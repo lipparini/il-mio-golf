@@ -268,9 +268,27 @@ def _api_get_clubs() -> list[dict]:
     ]
 
 
+def _api_post_with_retry(session, data: dict, max_attempts: int = 3) -> requests.Response:
+    """POST all'AJAX API con retry su errori di rete (non su 4xx/5xx)."""
+    last_exc = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            r = session.post(AJAX_URL, data=data, timeout=30)
+            r.raise_for_status()
+            return r
+        except requests.exceptions.ConnectionError as e:
+            last_exc = e
+            if attempt < max_attempts:
+                time.sleep(2 ** attempt)   # backoff: 2s, 4s
+        except requests.exceptions.Timeout as e:
+            last_exc = e
+            if attempt < max_attempts:
+                time.sleep(2 ** attempt)
+    raise last_exc
+
+
 def _api_get_percorsi(session, club_id: str) -> list[dict]:
-    r = session.post(AJAX_URL, data={"action": "club-courses", "club_id": club_id}, timeout=15)
-    r.raise_for_status()
+    r = _api_post_with_retry(session, {"action": "club-courses", "club_id": club_id})
     data = r.json()
     if not isinstance(data, list):
         return []
@@ -284,8 +302,7 @@ def _api_get_percorsi(session, club_id: str) -> list[dict]:
 
 
 def _api_get_tees(session, percorso_id) -> list[str]:
-    r = session.post(AJAX_URL, data={"action": "courses-tees", "percorso_id": str(percorso_id)}, timeout=15)
-    r.raise_for_status()
+    r = _api_post_with_retry(session, {"action": "courses-tees", "percorso_id": str(percorso_id)})
     data = r.json()
     if not isinstance(data, list):
         return []
@@ -299,14 +316,13 @@ def _api_get_tees(session, percorso_id) -> list[str]:
 
 
 def _api_get_cr_sr(session, club_id: str, percorso_id, tee: str):
-    r = session.post(AJAX_URL, data={
+    r = _api_post_with_retry(session, {
         "action": "course-handicap",
         "club_id": club_id,
         "percorso_id": str(percorso_id),
         "tee": tee,
         "handicap": "18.0",
-    }, timeout=15)
-    r.raise_for_status()
+    })
     data = r.json()
     if not data or not isinstance(data, list) or not isinstance(data[0], (list, tuple)):
         return None, None, None, None, None
@@ -317,12 +333,24 @@ def _api_get_cr_sr(session, club_id: str, percorso_id, tee: str):
 
 
 def scrape_campi_api() -> dict:
-    """Scraping CR/SR da API pubblica Federgolf. Campi condivisi tra tutti gli utenti."""
-    stats = {"campi": 0, "ratings": 0, "errori": 0}
+    """
+    Scraping CR/SR da API pubblica Federgolf (requests + BeautifulSoup, NO Playwright).
+    Campi condivisi tra tutti gli utenti.
 
-    log("API campi: recupero lista circoli ...")
-    clubs = _api_get_clubs()
-    log(f"  {len(clubs)} circoli trovati.")
+    Nota: l'API handicap restituisce ~221-226 circoli (solo quelli con rating WHS).
+    I restanti ~115 circoli affiliati senza CR/SR non appaiono in questa API.
+    """
+    stats = {"campi": 0, "ratings": 0, "errori": 0, "skip_no_percorsi": 0}
+
+    log("API campi: recupero lista circoli (NO Playwright — solo HTTP) ...")
+    try:
+        clubs = _api_get_clubs()
+    except Exception as e:
+        log(f"  ERRORE FATALE recupero lista circoli: {e}")
+        return stats
+
+    log(f"  {len(clubs)} circoli nell'API handicap Federgolf.")
+    log(f"  Nota: ~120 circoli senza rating WHS non compaiono in questa API.")
 
     session = requests.Session()
     session.headers.update({
@@ -334,15 +362,22 @@ def scrape_campi_api() -> dict:
     for i, club in enumerate(clubs, 1):
         nome = club["nome"]
         club_id = club["club_id"]
-        log(f"  [{i}/{len(clubs)}] {nome}")
+
+        # Progresso ogni 10 circoli
+        if i % 10 == 0 or i == 1:
+            log(f"  [{i}/{len(clubs)}] campi={stats['campi']} rating={stats['ratings']} errori={stats['errori']}")
 
         try:
             percorsi = _api_get_percorsi(session, club_id)
             if not percorsi:
+                log(f"  [{i}] {nome}: nessun percorso, skip.")
+                stats["skip_no_percorsi"] += 1
+                time.sleep(0.2)
                 continue
 
             campo_id = save_campo({"nome": nome})
             if not campo_id:
+                log(f"  [{i}] {nome}: impossibile salvare campo nel DB.")
                 stats["errori"] += 1
                 continue
             stats["campi"] += 1
@@ -357,7 +392,7 @@ def scrape_campi_api() -> dict:
                 try:
                     tees = _api_get_tees(session, perc_id)
                 except Exception as e:
-                    log(f"    ERRORE tees '{perc_nome}': {e}")
+                    log(f"    [{i}] {nome} / percorso '{perc_nome}': ERRORE tees — {e}")
                     stats["errori"] += 1
                     continue
 
@@ -387,11 +422,15 @@ def scrape_campi_api() -> dict:
                             "cr": cr, "sr": sr, "par": par,
                         })
                     except Exception as e:
-                        log(f"    ERRORE CR/SR '{perc_nome}' tee={tee}: {e}")
+                        log(f"    [{i}] {nome} / tee={tee}: ERRORE CR/SR — {e}")
                         stats["errori"] += 1
 
             if ratings_batch:
                 stats["ratings"] += save_campo_ratings(campo_id, ratings_batch)
+            log(f"  [{i}] {nome}: {len(percorsi)} percorsi, {len(ratings_batch)} rating salvati.")
+
+            # Piccola pausa per non sovraccaricare il server
+            time.sleep(0.3)
 
         except Exception as e:
             log(f"  ERRORE circolo '{nome}': {e}")
