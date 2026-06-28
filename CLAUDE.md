@@ -268,3 +268,5 @@ flask --app "app:create_app()" run --debug
 | 2026-06-28 | Deploy: railway.toml + nixpacks.toml → Dockerfile (fix Playwright su Railway) |
 | 2026-06-28 | Fix porta: ${PORT:-8080} in Dockerfile CMD, nessun startCommand in railway.toml |
 | 2026-06-28 | Fix scraper campi: _api_post_with_retry (3 tentativi, backoff 2s/4s), timeout 30s, log dettagliato per circolo, pausa 0.3s tra richieste |
+| 2026-06-28 | Porting scrape_regioni.py + scrape_detail.py in app/scraper.py: scrape_campi_completo() con 3 fasi (geografico 341 circoli, dettaglio club_id/buche_tot/contatti, CR/SR API 223 circoli) |
+| 2026-06-28 | models.py: save_campo aggiornato con club_id + COALESCE su tutti i campi geografici; aggiunti update_campo_details() e get_campi_with_club_id() |
