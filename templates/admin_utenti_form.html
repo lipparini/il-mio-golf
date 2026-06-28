@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}{{ titolo }} — Il mio golf{% endblock %}
+{% block main_class %}{% endblock %}
+
+{% block content %}
+<div class="bg-yellow-700 text-white px-4 py-4 sticky top-14 z-30 shadow">
+  <a href="/admin/utenti" class="text-yellow-200 text-sm flex items-center gap-1 mb-1 hover:text-white">← Gestione utenti</a>
+  <h2 class="text-lg font-bold">{{ titolo }}</h2>
+</div>
+
+<div class="max-w-lg mx-auto px-4 py-5">
+
+  {% if error %}
+  <div class="mb-4 bg-red-100 border border-red-300 text-red-700 rounded-xl px-4 py-3 text-sm">
+    {{ error }}
+  </div>
+  {% endif %}
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, msg in messages %}
+    <div class="mb-4 bg-green-100 border border-green-300 text-green-700 rounded-xl px-4 py-3 text-sm">
+      {{ msg }}
+    </div>
+    {% endfor %}
+  {% endwith %}
+
+  <form method="POST" class="bg-white rounded-2xl shadow p-5 space-y-4">
+
+    <h3 class="font-bold text-gray-700 border-b pb-2">Dati personali</h3>
+
+    <div class="grid grid-cols-2 gap-3">
+      <div>
+        <label class="block text-sm font-semibold text-gray-700 mb-1">Nome</label>
+        <input name="nome" type="text" value="{{ utente.nome or '' if utente else '' }}"
+               class="w-full border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400">
+      </div>
+      <div>
+        <label class="block text-sm font-semibold text-gray-700 mb-1">Cognome</label>
+        <input name="cognome" type="text" value="{{ utente.cognome or '' if utente else '' }}"
+               class="w-full border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400">
+      </div>
+    </div>
+
+    <div>
+      <label class="block text-sm font-semibold text-gray-700 mb-1">Email *</label>
+      <input name="email" type="email" required value="{{ utente.email if utente else '' }}"
+             {% if utente %}readonly class="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-gray-50"
+             {% else %}class="w-full border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400"{% endif %}>
+    </div>
+
+    {% if not utente %}
+    <div>
+      <label class="block text-sm font-semibold text-gray-700 mb-1">Password *</label>
+      <input name="password" type="password" required autocomplete="new-password"
+             class="w-full border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400">
+    </div>
+    {% else %}
+    <div>
+      <label class="block text-sm font-semibold text-gray-700 mb-1">Nuova password (lascia vuoto per non cambiare)</label>
+      <input name="new_password" type="password" autocomplete="new-password"
+             class="w-full border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400">
+    </div>
+    {% endif %}
+
+    <h3 class="font-bold text-gray-700 border-b pb-2 pt-2">Credenziali Federgolf</h3>
+
+    <div>
+      <label class="block text-sm font-semibold text-gray-700 mb-1">Username Federgolf (numero tesserato)</label>
+      <input name="federgolf_username" type="text"
+             value="{{ utente.federgolf_username or '' if utente else '' }}"
+             placeholder="es. 161705"
+             class="w-full border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400">
+    </div>
+
+    <div>
+      <label class="block text-sm font-semibold text-gray-700 mb-1">
+        Password Federgolf {% if utente %}(lascia vuoto per non cambiare){% else %}*{% endif %}
+      </label>
+      <input name="federgolf_password" type="password" autocomplete="new-password"
+             class="w-full border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400">
+      <p class="text-xs text-gray-400 mt-1">Cifrata con Fernet — non visibile dopo il salvataggio.</p>
+    </div>
+
+    <h3 class="font-bold text-gray-700 border-b pb-2 pt-2">Permessi</h3>
+
+    <div class="space-y-3">
+      {% if utente %}
+      <label class="flex items-center gap-3 cursor-pointer">
+        <input type="checkbox" name="attivo" value="1"
+               {% if utente.attivo %}checked{% endif %}
+               class="w-5 h-5 rounded text-yellow-600 focus:ring-yellow-400">
+        <div>
+          <span class="text-sm font-semibold text-gray-700">Utente attivo</span>
+          <p class="text-xs text-gray-400">Se disabilitato, non può accedere e non viene aggiornato dal job notturno.</p>
+        </div>
+      </label>
+      {% endif %}
+
+      <label class="flex items-center gap-3 cursor-pointer">
+        <input type="checkbox" name="admin" value="1"
+               {% if utente and utente.admin %}checked{% endif %}
+               class="w-5 h-5 rounded text-yellow-600 focus:ring-yellow-400">
+        <div>
+          <span class="text-sm font-semibold text-gray-700">Amministratore</span>
+          <p class="text-xs text-gray-400">Può vedere tutti gli utenti e avviare lo scraping dei campi.</p>
+        </div>
+      </label>
+    </div>
+
+    <button type="submit"
+            class="w-full bg-yellow-600 hover:bg-yellow-500 active:bg-yellow-700 text-white
+                   font-bold py-4 rounded-xl transition-colors text-base touch-manipulation mt-2">
+      {{ 'Salva modifiche' if utente else 'Crea utente' }}
+    </button>
+
+  </form>
+</div>
+{% endblock %}

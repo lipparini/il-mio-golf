@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block title %}Il mio golf — Menu{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto px-4 py-6">
+
+  <!-- Benvenuto -->
+  <div class="mb-6">
+    <h2 class="text-xl font-bold text-gray-800">
+      Ciao, {{ current_user.nome or current_user.email }} 👋
+    </h2>
+    <p class="text-gray-500 text-sm mt-0.5">Cruscotto personale golf</p>
+  </div>
+
+  <!-- HCP badge -->
+  {% if stats.hcp_attuale %}
+  <div class="bg-green-800 text-white rounded-2xl p-5 mb-6 shadow-md">
+    <p class="text-green-300 text-xs font-semibold uppercase tracking-wide mb-1">HCP Index attuale</p>
+    <p class="text-4xl font-bold">{{ stats.hcp_attuale }}</p>
+  </div>
+  {% endif %}
+
+  <!-- Card menu -->
+  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+    <!-- I miei risultati -->
+    <a href="/risultati"
+       class="group bg-white rounded-2xl shadow hover:shadow-md border border-gray-100
+              hover:border-green-400 transition-all duration-150 p-5 flex gap-4 items-start
+              active:bg-green-50">
+      <div class="flex-shrink-0 w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center
+                  group-hover:bg-green-200 transition-colors text-2xl">
+        🏆
+      </div>
+      <div>
+        <h3 class="text-base font-bold text-gray-800 group-hover:text-green-700">I miei risultati</h3>
+        <p class="text-sm text-gray-500 mt-0.5 leading-snug">
+          Storico gare, score differenziali, HCP.<br>
+          <span class="text-green-700 font-semibold">{{ stats.gare }}</span> gare nel database.
+        </p>
+      </div>
+    </a>
+
+    <!-- Campi da golf -->
+    <a href="/campi"
+       class="group bg-white rounded-2xl shadow hover:shadow-md border border-gray-100
+              hover:border-green-400 transition-all duration-150 p-5 flex gap-4 items-start
+              active:bg-green-50">
+      <div class="flex-shrink-0 w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center
+                  group-hover:bg-green-200 transition-colors text-2xl">
+        🗺️
+      </div>
+      <div>
+        <h3 class="text-base font-bold text-gray-800 group-hover:text-green-700">Campi da golf in Italia</h3>
+        <p class="text-sm text-gray-500 mt-0.5 leading-snug">
+          Circoli italiani con CR, SR e dati.<br>
+          <span class="text-green-700 font-semibold">{{ stats.campi }}</span> campi nel database.
+        </p>
+      </div>
+    </a>
+
+    <!-- Calcolo HCP -->
+    <a href="/handicap"
+       class="group bg-white rounded-2xl shadow hover:shadow-md border border-gray-100
+              hover:border-green-400 transition-all duration-150 p-5 flex gap-4 items-start
+              active:bg-green-50">
+      <div class="flex-shrink-0 w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center
+                  group-hover:bg-green-200 transition-colors text-2xl">
+        🧮
+      </div>
+      <div>
+        <h3 class="text-base font-bold text-gray-800 group-hover:text-green-700">Calcolo HCP di gioco</h3>
+        <p class="text-sm text-gray-500 mt-0.5 leading-snug">
+          Playing Handicap WHS per qualsiasi campo.<br>
+          Formula: HCP Index × (SR/113) + (CR − Par)
+        </p>
+      </div>
+    </a>
+
+    <!-- Simulazione -->
+    <a href="/simulazione"
+       class="group bg-white rounded-2xl shadow hover:shadow-md border border-gray-100
+              hover:border-green-400 transition-all duration-150 p-5 flex gap-4 items-start
+              active:bg-green-50">
+      <div class="flex-shrink-0 w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center
+                  group-hover:bg-green-200 transition-colors text-2xl">
+        📊
+      </div>
+      <div>
+        <h3 class="text-base font-bold text-gray-800 group-hover:text-green-700">Simulazione HCP</h3>
+        <p class="text-sm text-gray-500 mt-0.5 leading-snug">
+          Simula come cambia l'HCP index dopo una gara.<br>
+          Grafico degli ultimi 20 SD.
+        </p>
+      </div>
+    </a>
+
+  </div>
+</div>
+{% endblock %}

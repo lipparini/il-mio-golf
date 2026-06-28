@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Gestione utenti — Il mio golf{% endblock %}
+{% block main_class %}{% endblock %}
+
+{% block content %}
+<div class="bg-yellow-700 text-white px-4 py-4 sticky top-14 z-30 shadow flex items-center justify-between">
+  <div>
+    <h2 class="text-lg font-bold">Gestione utenti</h2>
+    <p class="text-yellow-200 text-xs">{{ users|length }} utenti registrati</p>
+  </div>
+  <a href="/admin/utenti/nuovo"
+     class="bg-white text-yellow-800 font-bold px-4 py-2.5 rounded-xl text-sm hover:bg-yellow-50 touch-manipulation">
+    + Nuovo utente
+  </a>
+</div>
+
+<div class="max-w-2xl mx-auto px-4 py-5 space-y-3">
+  {% for u in users %}
+  <div class="bg-white rounded-2xl shadow p-4">
+    <div class="flex items-start justify-between gap-3">
+      <div class="min-w-0">
+        <div class="flex items-center gap-2 flex-wrap">
+          <p class="font-bold text-gray-800">{{ u.nome or '' }} {{ u.cognome or '' }}
+            {% if not u.nome and not u.cognome %}<span class="text-gray-400 font-normal italic">Senza nome</span>{% endif %}
+          </p>
+          {% if u.admin %}<span class="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded font-semibold">Admin</span>{% endif %}
+          {% if not u.attivo %}<span class="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded font-semibold">Disabilitato</span>{% endif %}
+        </div>
+        <p class="text-sm text-gray-500 mt-0.5">{{ u.email }}</p>
+        <div class="flex gap-4 mt-1.5 text-xs text-gray-400 flex-wrap">
+          <span>🏌️ {{ u.n_gare }} gare</span>
+          {% if u.federgolf_username %}
+          <span>🔑 Federgolf: {{ u.federgolf_username }}</span>
+          {% else %}
+          <span class="text-red-400">⚠️ Nessuna credenziale Federgolf</span>
+          {% endif %}
+          <span>📅 {{ u.creato_il.strftime('%d/%m/%Y') if u.creato_il else '—' }}</span>
+        </div>
+      </div>
+      <a href="/admin/utenti/{{ u.id }}/modifica"
+         class="flex-shrink-0 bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-xl text-sm font-medium touch-manipulation">
+        Modifica
+      </a>
+    </div>
+  </div>
+  {% else %}
+  <div class="text-center py-12 text-gray-400">
+    <p class="text-lg mb-2">Nessun utente registrato.</p>
+    <a href="/admin/utenti/nuovo" class="text-yellow-700 hover:underline font-medium">Crea il primo utente</a>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

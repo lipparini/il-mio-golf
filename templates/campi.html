@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block title %}Il mio golf — Campi da golf{% endblock %}
+{% block main_class %}{% endblock %}
+
+{% block content %}
+<div class="bg-green-800 text-white px-4 py-4 flex items-center justify-between gap-3 sticky top-14 z-30 shadow">
+  <div>
+    <h2 class="text-lg font-bold">Campi da golf in Italia</h2>
+    <p class="text-green-300 text-xs">{{ total_campi }} circoli nel database</p>
+  </div>
+  {% if current_user.admin %}
+  <button onclick="aggiornaElenco()"
+          class="bg-white text-green-800 font-bold px-3 py-2 rounded-xl text-xs hover:bg-green-100 touch-manipulation flex items-center gap-1">
+    <svg id="campiSpinner" class="h-3 w-3 animate-spin hidden" fill="none" viewBox="0 0 24 24">
+      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+    </svg>
+    Aggiorna campi
+  </button>
+  {% endif %}
+</div>
+
+<div id="toast" class="fixed top-24 right-4 z-50 hidden max-w-xs rounded-xl shadow-lg px-4 py-3 text-white text-sm font-medium"></div>
+
+<!-- Filtri -->
+<div class="px-3 pt-3 pb-2 flex flex-wrap gap-2">
+  <input id="searchInput" type="search" placeholder="Cerca circolo..." oninput="filtraLista()"
+         class="border border-gray-300 rounded-xl px-4 py-2.5 text-sm bg-white
+                focus:outline-none focus:ring-2 focus:ring-green-500 min-h-[44px] flex-1 min-w-[160px]">
+  <select id="regioneSelect" onchange="filtraLista()"
+          class="border border-gray-300 rounded-xl px-3 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-green-500 min-h-[44px]">
+    <option value="">Tutte le regioni</option>
+  </select>
+  <select id="bucheSelect" onchange="filtraLista()"
+          class="border border-gray-300 rounded-xl px-3 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-green-500 min-h-[44px]">
+    <option value="">Tutte le buche</option>
+    <option value="18">18 buche</option>
+    <option value="9">9 buche</option>
+    <option value="27+">27+ buche</option>
+    <option value="pp">Pitch & Putt</option>
+  </select>
+</div>
+
+<!-- Legenda + contatore -->
+<div class="px-3 pb-2 flex items-center gap-4 text-xs text-gray-500">
+  <span><span class="text-green-600 font-bold">✓</span> Con rating WHS</span>
+  <span><span class="text-gray-400">✗</span> Senza rating</span>
+  <span id="contatoreVisible" class="ml-auto text-gray-600 font-medium"></span>
+</div>
+
+<!-- Griglia campi (client-side) -->
+<div id="listaCampi" class="px-3 pb-6 grid grid-cols-1 sm:grid-cols-2 gap-2">
+  <!-- popolata da JS -->
+</div>
+
+<div id="nessunoVisible" class="hidden px-4 py-10 text-center text-gray-400">
+  Nessun circolo trovato.
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allCampi = [];
+let regioni = new Set();
+
+async function caricaCampi() {
+  const resp = await fetch('/api/campi_tutti');
+  allCampi = await resp.json();
+  allCampi.forEach(c => { if (c.regione) regioni.add(c.regione); });
+  const sel = document.getElementById('regioneSelect');
+  [...regioni].sort().forEach(r => {
+    const opt = document.createElement('option');
+    opt.value = r; opt.textContent = r;
+    sel.appendChild(opt);
+  });
+  filtraLista();
+}
+
+function badgeBuche(tipo) {
+  if (!tipo || tipo === '0') return '';
+  const n = parseInt(tipo);
+  if (isNaN(n)) return '';
+  if (n >= 27) return `<span class="ml-1.5 text-xs font-bold bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">${tipo}</span>`;
+  if (n === 18) return `<span class="ml-1.5 text-xs font-bold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">18</span>`;
+  if (n === 9) return `<span class="ml-1.5 text-xs font-bold bg-cyan-100 text-cyan-700 px-1.5 py-0.5 rounded">9</span>`;
+  return `<span class="ml-1.5 text-xs font-bold bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">${n}</span>`;
+}
+
+function matchBuche(campo, filtro) {
+  const t = campo.tipo_buche;
+  if (!filtro) return true;
+  if (filtro === '18') return t === '18';
+  if (filtro === '9') return t === '9';
+  if (filtro === '27+') { const n = parseInt(t); return !isNaN(n) && n >= 27; }
+  if (filtro === 'pp') { const n = parseInt(t); return !isNaN(n) && n >= 1 && n <= 8; }
+  return true;
+}
+
+function filtraLista() {
+  const q = document.getElementById('searchInput').value.toLowerCase();
+  const regione = document.getElementById('regioneSelect').value;
+  const buche = document.getElementById('bucheSelect').value;
+
+  const filtered = allCampi.filter(c =>
+    (!q || c.nome.toLowerCase().includes(q)) &&
+    (!regione || c.regione === regione) &&
+    matchBuche(c, buche)
+  );
+
+  const lista = document.getElementById('listaCampi');
+  lista.innerHTML = '';
+
+  filtered.forEach(c => {
+    const div = document.createElement('a');
+    div.href = `/campi/${c.id}`;
+    const ratingClass = c.has_rating
+      ? 'border-green-200 hover:border-green-400'
+      : 'border-gray-200 hover:border-gray-300';
+    div.className = `flex items-center gap-3 bg-white rounded-xl border ${ratingClass} px-4 py-3 transition-all shadow-sm hover:shadow active:bg-gray-50`;
+    div.innerHTML = `
+      <span class="${c.has_rating ? 'text-green-600' : 'text-gray-300'} text-base flex-shrink-0" title="${c.has_rating ? 'Rating WHS disponibile' : 'Nessun rating WHS'}">
+        ${c.has_rating ? '✓' : '✗'}
+      </span>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-1 flex-wrap">
+          <span class="font-semibold text-gray-800 text-sm truncate">${c.nome}</span>
+          ${badgeBuche(c.tipo_buche)}
+        </div>
+        ${c.regione ? `<p class="text-xs text-gray-400 mt-0.5">${c.regione}</p>` : ''}
+      </div>
+      <svg class="h-4 w-4 text-gray-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+      </svg>
+    `;
+    lista.appendChild(div);
+  });
+
+  document.getElementById('contatoreVisible').textContent = `${filtered.length} circoli`;
+  document.getElementById('nessunoVisible').classList.toggle('hidden', filtered.length > 0);
+}
+
+function showToast(msg, type) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = `fixed top-24 right-4 z-50 max-w-xs rounded-xl shadow-lg px-4 py-3 text-white text-sm font-medium ${
+    type === 'error' ? 'bg-red-600' : type === 'success' ? 'bg-green-700' : 'bg-blue-600'
+  }`;
+  t.classList.remove('hidden');
+  if (type !== 'info') setTimeout(() => t.classList.add('hidden'), 5000);
+}
+
+function aggiornaElenco() {
+  document.getElementById('campiSpinner').classList.remove('hidden');
+  showToast('Aggiornamento CR/SR in corso...', 'info');
+  fetch('/api/scraper/run_campi', { method: 'POST' }).then(r => r.json()).then(data => {
+    if (data.status === 'already_running') {
+      showToast('Aggiornamento già in corso.', 'info');
+    } else {
+      const poll = setInterval(() => {
+        fetch('/api/scraper/status_campi').then(r => r.json()).then(s => {
+          if (s.status === 'done') {
+            clearInterval(poll);
+            document.getElementById('campiSpinner').classList.add('hidden');
+            showToast(s.message, 'success');
+            caricaCampi();
+          } else if (s.status === 'error') {
+            clearInterval(poll);
+            document.getElementById('campiSpinner').classList.add('hidden');
+            showToast('Errore: ' + s.message, 'error');
+          }
+        });
+      }, 3000);
+    }
+  });
+}
+
+caricaCampi();
+</script>
+{% endblock %}

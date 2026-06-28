@@ -1,0 +1,298 @@
+{% extends "base.html" %}
+
+{% block title %}Il mio golf — I miei risultati{% endblock %}
+
+{% block main_class %}{% endblock %}
+
+{% block content %}
+<!-- Header sezione -->
+<div class="bg-green-800 text-white px-4 py-4 flex flex-wrap items-center justify-between gap-3 sticky top-14 z-30 shadow">
+  <div>
+    <h2 class="text-lg font-bold leading-tight">I miei risultati</h2>
+    <p class="text-green-300 text-xs">{{ total_db }} gare nel database</p>
+  </div>
+  <button id="btnAggiorna" onclick="avviaAggiornamento()"
+          class="bg-white text-green-800 font-bold px-4 py-2.5 rounded-xl
+                 hover:bg-green-100 active:bg-green-200 transition flex items-center gap-2 text-sm touch-manipulation">
+    <svg id="iconRefresh" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+    </svg>
+    <svg id="iconSpinner" class="h-4 w-4 animate-spin hidden" fill="none" viewBox="0 0 24 24">
+      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+    </svg>
+    <span id="btnLabel">Aggiorna ora</span>
+  </button>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="fixed top-24 right-4 z-50 hidden max-w-xs rounded-xl shadow-lg px-4 py-3 text-white text-sm font-medium"></div>
+
+{% if db_error %}
+<div class="mx-4 mt-3 bg-red-100 border border-red-300 text-red-700 rounded-lg p-3 text-sm">
+  Errore database: {{ db_error }}
+</div>
+{% endif %}
+
+<!-- Filtri -->
+<div class="mx-3 mt-3 bg-white rounded-xl shadow px-3 py-3 flex flex-wrap items-center gap-2">
+
+  <select id="annoSelect" onchange="applyFilters()"
+          class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white min-h-[40px]">
+    <option value="">Tutti gli anni</option>
+    {% for y in anni %}
+    <option value="{{ y }}" {% if anno == y|string %}selected{% endif %}>{{ y }}</option>
+    {% endfor %}
+  </select>
+
+  <div class="relative" id="formulaContainer">
+    <button type="button" id="formulaBtn" onclick="toggleFormula(event)"
+            class="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white flex items-center gap-2 min-h-[40px] min-w-[130px] justify-between">
+      <span id="formulaLabel">...</span>
+      <svg class="h-3 w-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+      </svg>
+    </button>
+    <div id="formulaDropdown"
+         class="hidden absolute top-full left-0 z-20 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg p-2 min-w-[160px] max-h-60 overflow-y-auto"
+         onclick="event.stopPropagation()">
+      <label class="flex items-center gap-2 px-2 py-2 hover:bg-gray-50 rounded cursor-pointer text-sm font-medium border-b mb-1">
+        <input type="checkbox" id="formulaTutte" onchange="toggleTutteFormule(this)"> Tutte / Nessuna
+      </label>
+      {% for f in formule_all %}
+      <label class="flex items-center gap-2 px-2 py-2 hover:bg-gray-50 rounded cursor-pointer text-sm formula-item">
+        <input type="checkbox" class="formula-cb" value="{{ f }}"
+               {% if not formule_sel or f in formule_sel %}checked{% endif %}
+               onchange="applyFilters()">
+        <span class="font-mono">{{ f }}</span>
+      </label>
+      {% endfor %}
+    </div>
+  </div>
+
+  <select id="esecutoreSelect" onchange="applyFilters()"
+          class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white min-h-[40px] max-w-[180px]">
+    <option value="">Tutti i circoli</option>
+    {% for e in esecutori %}
+    <option value="{{ e }}" {% if esecutore == e %}selected{% endif %}>{{ e }}</option>
+    {% endfor %}
+  </select>
+
+  <select id="validaSelect" onchange="applyFilters()"
+          class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white min-h-[40px]">
+    <option value="">Valida: tutte</option>
+    <option value="S" {% if valida == 'S' %}selected{% endif %}>Solo valide</option>
+    <option value="N" {% if valida == 'N' %}selected{% endif %}>Non valide</option>
+  </select>
+
+  <div class="ml-auto flex items-center gap-3">
+    {% if anno or formule_sel or esecutore or valida %}
+    <a href="/risultati" class="text-xs text-green-700 hover:underline font-medium whitespace-nowrap">✕ Rimuovi filtri</a>
+    {% endif %}
+    <span class="text-sm font-bold text-gray-700">
+      <span class="text-green-800">{{ gare|length }}</span> gare
+    </span>
+  </div>
+</div>
+
+<!-- Tabella scrollabile -->
+<div class="px-3 py-3">
+  <div class="overflow-x-auto rounded-xl shadow">
+    <table class="min-w-full text-xs bg-white">
+      <thead class="bg-green-800 text-white sticky top-0">
+        <tr>
+          <th class="px-3 py-2.5 text-left font-semibold whitespace-nowrap">Data</th>
+          <th class="px-3 py-2.5 text-left font-semibold whitespace-nowrap">Gara</th>
+          <th class="px-3 py-2.5 text-center font-semibold">Giro</th>
+          <th class="px-3 py-2.5 text-left font-semibold">Formula</th>
+          <th class="px-3 py-2.5 text-center font-semibold">Buche</th>
+          <th class="px-3 py-2.5 text-center font-semibold">Pl.HCP</th>
+          <th class="px-3 py-2.5 text-center font-semibold">Par</th>
+          <th class="px-3 py-2.5 text-center font-semibold">CR</th>
+          <th class="px-3 py-2.5 text-center font-semibold">SR</th>
+          <th class="px-3 py-2.5 text-center font-bold whitespace-nowrap" style="background:#14532d;min-width:52px">Stbl</th>
+          <th class="px-3 py-2.5 text-center font-semibold">AGS</th>
+          <th class="px-3 py-2.5 text-center font-semibold">PCC</th>
+          <th class="px-3 py-2.5 text-center font-semibold">SD</th>
+          <th class="px-3 py-2.5 text-center font-semibold whitespace-nowrap">Idx Prec.</th>
+          <th class="px-3 py-2.5 text-center font-semibold whitespace-nowrap">Idx Nuovo</th>
+          <th class="px-3 py-2.5 text-center font-semibold">Var.</th>
+          <th class="px-3 py-2.5 text-left font-semibold whitespace-nowrap">Motivazione</th>
+          <th class="px-3 py-2.5 text-left font-semibold">Esecutore</th>
+          <th class="px-3 py-2.5 text-center font-semibold">Valida</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100">
+        {% for g in gare %}
+        {% set is_hcp = g.id in hcp_contributing_ids %}
+        <tr class="transition-colors {% if is_hcp %}bg-green-100 hover:bg-green-200{% else %}hover:bg-green-50{% endif %}">
+          <td class="px-3 py-2 font-mono whitespace-nowrap">
+            {% if is_hcp %}<span class="text-green-700 font-bold" title="Contribuisce all'HCP index">★</span> {% endif %}{{ g.data_raw }}
+          </td>
+          <td class="px-3 py-2 whitespace-nowrap max-w-[180px] truncate" title="{{ g.gara or '' }}">{{ g.gara or '' }}</td>
+          <td class="px-3 py-2 text-center">{{ g.giro or '' }}</td>
+          <td class="px-3 py-2 font-mono">{{ g.formula or '' }}</td>
+          <td class="px-3 py-2 text-center">{{ g.buche or '' }}</td>
+          <td class="px-3 py-2 text-center">{{ g.playing_hcp or '' }}</td>
+          <td class="px-3 py-2 text-center">{{ g.par or '' }}</td>
+          <td class="px-3 py-2 text-center">{{ g.cr or '' }}</td>
+          <td class="px-3 py-2 text-center">{{ g.sr or '' }}</td>
+          <td class="px-3 py-2 text-center">
+            {% if g.stbl %}
+              {% set sv = g.stbl | int(default=-1) %}
+              {% if sv >= 40 %}{% set c = '#15803d' %}
+              {% elif sv >= 36 %}{% set c = '#16a34a' %}
+              {% elif sv >= 30 %}{% set c = '#ea580c' %}
+              {% else %}{% set c = '#dc2626' %}{% endif %}
+              <span class="font-bold text-white px-1.5 py-0.5 rounded text-xs"
+                    style="background:{{ c }}">{{ g.stbl }}</span>
+            {% endif %}
+          </td>
+          <td class="px-3 py-2 text-center">{{ g.ags or '' }}</td>
+          <td class="px-3 py-2 text-center">{{ g.pcc or '' }}</td>
+          <td class="px-3 py-2 text-center">{{ g.sd or '' }}</td>
+          <td class="px-3 py-2 text-center">{{ g.index_vecchio or '' }}</td>
+          <td class="px-3 py-2 text-center font-semibold">{{ g.index_nuovo or '' }}</td>
+          <td class="px-3 py-2 text-center font-semibold
+            {% if g.variazione and g.variazione.startswith('-') %}text-green-600
+            {% elif g.variazione and g.variazione not in ('', '0', '0,0', '0.0') %}text-red-500{% endif %}">
+            {{ g.variazione or '' }}
+          </td>
+          <td class="px-3 py-2 text-gray-500 max-w-[160px] truncate text-xs" title="{{ g.motivazione_variazione or '' }}">{{ g.motivazione_variazione or '' }}</td>
+          <td class="px-3 py-2 text-gray-500 max-w-[140px] truncate" title="{{ g.esecutore or '' }}">{{ g.esecutore or '' }}</td>
+          <td class="px-3 py-2 text-center">{{ g.valida or '' }}</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="19" class="px-4 py-10 text-center text-gray-400">
+            {% if anno or formule_sel or esecutore or valida %}
+              Nessuna gara corrisponde ai filtri.
+            {% else %}
+              Nessuna gara nel database. Clicca "Aggiorna ora" per scaricare i dati da Federgolf.
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if hcp_contributing_ids %}
+  <div class="mt-3 flex items-center gap-2 text-xs text-gray-500">
+    <span class="inline-flex items-center gap-2 bg-green-100 border border-green-300 rounded-lg px-3 py-1.5">
+      <span class="text-green-700 font-bold">★</span>
+      Contribuisce al calcolo HCP index (migliori 8 SD sugli ultimi 20 giri)
+    </span>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const formuleAll = {{ formule_all | tojson }};
+
+  function updateFormulaLabel() {
+    const checked = Array.from(document.querySelectorAll('.formula-cb:checked')).map(el => el.value);
+    const label = document.getElementById('formulaLabel');
+    const tutteChk = document.getElementById('formulaTutte');
+    if (checked.length === 0) {
+      label.textContent = 'Nessuna'; tutteChk.checked = false; tutteChk.indeterminate = false;
+    } else if (checked.length === formuleAll.length) {
+      label.textContent = 'Tutte'; tutteChk.checked = true; tutteChk.indeterminate = false;
+    } else {
+      label.textContent = `${checked.length}/${formuleAll.length}`;
+      tutteChk.checked = false; tutteChk.indeterminate = true;
+    }
+  }
+
+  function toggleTutteFormule(cb) {
+    document.querySelectorAll('.formula-cb').forEach(c => { c.checked = cb.checked; });
+    updateFormulaLabel(); applyFilters();
+  }
+
+  function toggleFormula(e) {
+    e.stopPropagation();
+    document.getElementById('formulaDropdown').classList.toggle('hidden');
+  }
+
+  document.addEventListener('click', () => {
+    document.getElementById('formulaDropdown').classList.add('hidden');
+  });
+
+  function applyFilters() {
+    updateFormulaLabel();
+    const params = new URLSearchParams();
+    const anno = document.getElementById('annoSelect').value;
+    if (anno) params.set('anno', anno);
+    const checked = Array.from(document.querySelectorAll('.formula-cb:checked')).map(el => el.value);
+    if (checked.length > 0 && checked.length < formuleAll.length)
+      checked.forEach(f => params.append('formula', f));
+    const esecutore = document.getElementById('esecutoreSelect').value;
+    if (esecutore) params.set('esecutore', esecutore);
+    const valida = document.getElementById('validaSelect').value;
+    if (valida) params.set('valida', valida);
+    window.location.href = '/risultati?' + params.toString();
+  }
+
+  updateFormulaLabel();
+
+  let pollingInterval = null;
+
+  function showToast(msg, type) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = `fixed top-24 right-4 z-50 max-w-xs rounded-xl shadow-lg px-4 py-3 text-white text-sm font-medium ${
+      type === 'error' ? 'bg-red-600' : type === 'success' ? 'bg-green-700' : 'bg-blue-600'
+    }`;
+    t.classList.remove('hidden');
+    if (type !== 'info') setTimeout(() => t.classList.add('hidden'), 5000);
+  }
+
+  function setLoading(on) {
+    document.getElementById('iconRefresh').classList.toggle('hidden', on);
+    document.getElementById('iconSpinner').classList.toggle('hidden', !on);
+    document.getElementById('btnLabel').textContent = on ? 'Aggiornamento...' : 'Aggiorna ora';
+    document.getElementById('btnAggiorna').disabled = on;
+  }
+
+  function pollStatus() {
+    fetch('/api/scraper/status').then(r => r.json()).then(data => {
+      if (data.status === 'done') {
+        clearInterval(pollingInterval);
+        setLoading(false);
+        showToast(data.message, 'success');
+        setTimeout(() => location.reload(), 1500);
+      } else if (data.status === 'error') {
+        clearInterval(pollingInterval);
+        setLoading(false);
+        showToast('Errore: ' + data.message, 'error');
+      }
+    }).catch(() => {
+      clearInterval(pollingInterval);
+      setLoading(false);
+      showToast('Errore di connessione.', 'error');
+    });
+  }
+
+  function avviaAggiornamento() {
+    setLoading(true);
+    showToast('Avvio scraping...', 'info');
+    fetch('/api/scraper/run', { method: 'POST' }).then(r => r.json()).then(data => {
+      if (data.status === 'error') {
+        setLoading(false);
+        showToast(data.message, 'error');
+      } else if (data.status === 'already_running') {
+        showToast('Aggiornamento già in corso.', 'info');
+        pollingInterval = setInterval(pollStatus, 3000);
+      } else {
+        pollingInterval = setInterval(pollStatus, 3000);
+      }
+    }).catch(() => {
+      setLoading(false);
+      showToast('Errore: impossibile avviare lo scraper.', 'error');
+    });
+  }
+</script>
+{% endblock %}

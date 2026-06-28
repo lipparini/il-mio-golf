@@ -1,0 +1,241 @@
+{% extends "base.html" %}
+{% block title %}Simulazione HCP — Il mio golf{% endblock %}
+{% block main_class %}{% endblock %}
+
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="bg-green-800 text-white px-4 py-4 sticky top-14 z-30 shadow">
+  <h2 class="text-lg font-bold">Simulazione variazione HCP</h2>
+  <p class="text-green-300 text-xs">Cosa succederebbe se giocassi questa gara?</p>
+</div>
+
+<div class="max-w-2xl mx-auto px-4 py-5 space-y-4">
+
+  <!-- Grafico SD attuali -->
+  {% if sd_list %}
+  <div class="bg-white rounded-2xl shadow p-4">
+    <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Ultimi {{ sd_list|length }} score differenziali</p>
+    <div style="height:180px">
+      <canvas id="chartSD"></canvas>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- HCP attuale -->
+  {% if hcp_attuale %}
+  <div class="bg-green-50 border border-green-200 rounded-2xl px-4 py-3 flex items-center justify-between">
+    <span class="text-sm text-gray-600">HCP Index attuale</span>
+    <span class="text-2xl font-bold text-green-800">{{ hcp_attuale }}</span>
+  </div>
+  {% endif %}
+
+  <!-- Form simulazione -->
+  <div class="bg-white rounded-2xl shadow p-5 space-y-4">
+    <h3 class="font-bold text-gray-800">Gara ipotetica</h3>
+
+    <div>
+      <label class="block text-sm font-semibold text-gray-700 mb-1.5">Campo</label>
+      <select id="selCampo" onchange="caricaPercorsi()"
+              class="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm bg-white
+                     focus:outline-none focus:ring-2 focus:ring-green-500 min-h-[48px]">
+        <option value="">— Seleziona il campo —</option>
+      </select>
+    </div>
+
+    <div>
+      <label class="block text-sm font-semibold text-gray-700 mb-1.5">Percorso / Tee</label>
+      <select id="selTee" disabled
+              class="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm bg-white
+                     focus:outline-none focus:ring-2 focus:ring-green-500 min-h-[48px]">
+        <option>— Prima seleziona il campo —</option>
+      </select>
+    </div>
+
+    <div class="flex gap-3">
+      <div class="flex-1">
+        <label class="block text-sm font-semibold text-gray-700 mb-1.5">Gross Score</label>
+        <input id="inpGross" type="number" min="50" max="200" placeholder="es. 95"
+               class="w-full border border-gray-300 rounded-xl px-4 py-3 text-base
+                      focus:outline-none focus:ring-2 focus:ring-green-500 min-h-[48px]">
+      </div>
+      <div class="w-28">
+        <label class="block text-sm font-semibold text-gray-700 mb-1.5">PCC</label>
+        <input id="inpPcc" type="number" step="0.1" min="-3" max="3" value="0"
+               class="w-full border border-gray-300 rounded-xl px-4 py-3 text-base
+                      focus:outline-none focus:ring-2 focus:ring-green-500 min-h-[48px]">
+      </div>
+    </div>
+
+    <button onclick="simula()"
+            class="w-full bg-green-700 hover:bg-green-600 active:bg-green-800 text-white
+                   font-bold py-4 rounded-xl transition-colors text-base touch-manipulation">
+      Simula gara
+    </button>
+  </div>
+
+  <!-- Risultato simulazione -->
+  <div id="risultato" class="hidden space-y-4">
+    <div class="bg-white rounded-2xl shadow p-5">
+      <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Risultato simulazione</p>
+      <div class="flex gap-3 mb-4">
+        <div class="flex-1 bg-gray-50 rounded-xl p-3 text-center">
+          <p class="text-xs text-gray-400">SD simulato</p>
+          <p id="sdNuovoVal" class="text-2xl font-bold text-gray-800"></p>
+        </div>
+        <div class="flex-1 bg-gray-50 rounded-xl p-3 text-center">
+          <p class="text-xs text-gray-400">HCP attuale</p>
+          <p id="hcpAttualeVal" class="text-2xl font-bold text-gray-800"></p>
+        </div>
+        <div id="hcpNuovoBox" class="flex-1 rounded-xl p-3 text-center">
+          <p class="text-xs opacity-70">Nuovo HCP</p>
+          <p id="hcpNuovoVal" class="text-2xl font-bold"></p>
+        </div>
+      </div>
+      <div id="variazioneBox" class="text-center py-2 rounded-xl">
+        <p id="variazioneVal" class="font-bold text-lg"></p>
+        <p id="variazioneLabel" class="text-xs mt-0.5"></p>
+      </div>
+    </div>
+
+    <!-- Grafico simulato -->
+    <div class="bg-white rounded-2xl shadow p-4">
+      <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">SD dopo la gara simulata</p>
+      <div style="height:200px">
+        <canvas id="chartSimulato"></canvas>
+      </div>
+      <div class="flex gap-4 mt-3 text-xs text-gray-400 justify-center flex-wrap">
+        <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-green-700 inline-block"></span> Best 8 (contribuisce HCP)</span>
+        <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-red-500 inline-block"></span> Gara simulata</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const sdListAttuali = {{ sd_list | tojson }};
+let ratingsData = [];
+let chartSimulato = null;
+
+// Grafico SD attuali
+{% if sd_list %}
+(function() {
+  const labels = sdListAttuali.map(d => d.data).reverse();
+  const vals = sdListAttuali.map(d => d.sd).reverse();
+  const sorted = [...vals].sort((a, b) => a - b);
+  const best8set = new Set(sorted.slice(0, 8));
+  const colors = vals.map(v => best8set.has(v) ? '#15803d' : '#d1d5db');
+  new Chart(document.getElementById('chartSD'), {
+    type: 'bar',
+    data: { labels, datasets: [{ data: vals, backgroundColor: colors, borderRadius: 4 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+      scales: { y: { ticks: { font: { size: 10 } } }, x: { ticks: { font: { size: 9 }, maxRotation: 45 } } }
+    }
+  });
+})();
+{% endif %}
+
+async function caricaCampi() {
+  const resp = await fetch('/api/campi');
+  const campi = await resp.json();
+  const sel = document.getElementById('selCampo');
+  campi.forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c.id;
+    opt.textContent = c.nome + (c.citta ? ` (${c.citta})` : '');
+    sel.appendChild(opt);
+  });
+}
+
+async function caricaPercorsi() {
+  const campoId = document.getElementById('selCampo').value;
+  const selTee = document.getElementById('selTee');
+  if (!campoId) { selTee.disabled = true; selTee.innerHTML = '<option>— Prima seleziona il campo —</option>'; return; }
+  const resp = await fetch(`/api/campi_rating?campo_id=${campoId}`);
+  ratingsData = await resp.json();
+  selTee.innerHTML = '<option value="">— Seleziona percorso/tee —</option>';
+  ratingsData.forEach(r => {
+    const opt = document.createElement('option');
+    opt.value = r.id;
+    const gLabel = r.genere === 'M' ? 'Uomini' : r.genere === 'F' ? 'Donne' : r.genere;
+    opt.textContent = `${r.percorso || '18 Buche'} · ${gLabel} · ${r.tee_colore} · CR ${r.cr} / SR ${r.sr}`;
+    selTee.appendChild(opt);
+  });
+  selTee.disabled = false;
+}
+
+async function simula() {
+  const gross = parseFloat(document.getElementById('inpGross').value);
+  const ratingId = parseInt(document.getElementById('selTee').value);
+  const pcc = parseFloat(document.getElementById('inpPcc').value) || 0;
+
+  if (isNaN(gross) || isNaN(ratingId)) {
+    alert('Seleziona il campo/tee e inserisci il Gross Score.'); return;
+  }
+
+  const params = new URLSearchParams({ gross_score: gross, rating_id: ratingId, pcc });
+  const resp = await fetch('/api/simulazione_hcp?' + params);
+  const data = await resp.json();
+  if (data.error) { alert('Errore: ' + data.error); return; }
+
+  document.getElementById('sdNuovoVal').textContent = data.sd_nuovo;
+  document.getElementById('hcpAttualeVal').textContent = data.hcp_attuale ?? '—';
+  document.getElementById('hcpNuovoVal').textContent = data.hcp_nuovo ?? '—';
+
+  const varBox = document.getElementById('variazioneBox');
+  const varVal = document.getElementById('variazioneVal');
+  const varLabel = document.getElementById('variazioneLabel');
+  const hcpBox = document.getElementById('hcpNuovoBox');
+
+  if (data.variazione !== null && data.variazione !== undefined) {
+    const v = data.variazione;
+    if (v < 0) {
+      varVal.textContent = v.toFixed(1) + ' 📉'; varVal.className = 'font-bold text-lg text-green-700';
+      varBox.className = 'text-center py-2 rounded-xl bg-green-50';
+      varLabel.textContent = 'HCP migliora (diminuisce)';
+      hcpBox.className = 'flex-1 bg-green-100 rounded-xl p-3 text-center text-green-800';
+    } else if (v > 0) {
+      varVal.textContent = '+' + v.toFixed(1) + ' 📈'; varVal.className = 'font-bold text-lg text-red-600';
+      varBox.className = 'text-center py-2 rounded-xl bg-red-50';
+      varLabel.textContent = 'HCP peggiora (aumenta)';
+      hcpBox.className = 'flex-1 bg-red-100 rounded-xl p-3 text-center text-red-800';
+    } else {
+      varVal.textContent = '= 0'; varVal.className = 'font-bold text-lg text-gray-600';
+      varBox.className = 'text-center py-2 rounded-xl bg-gray-50';
+      varLabel.textContent = 'HCP invariato';
+      hcpBox.className = 'flex-1 bg-gray-50 rounded-xl p-3 text-center';
+    }
+  }
+
+  // Grafico simulato
+  const sdList = data.sd_list;
+  const labels = sdList.map((d, i) => d.nuovo ? '★ Sim.' : d.data);
+  const vals = sdList.map(d => d.sd);
+  const colors = sdList.map((d, i) => {
+    if (d.nuovo) return '#ef4444';
+    return data.best8_indices.includes(i) ? '#15803d' : '#d1d5db';
+  });
+
+  if (chartSimulato) chartSimulato.destroy();
+  chartSimulato = new Chart(document.getElementById('chartSimulato'), {
+    type: 'bar',
+    data: { labels, datasets: [{ data: vals, backgroundColor: colors, borderRadius: 4 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+      scales: { y: { ticks: { font: { size: 10 } } }, x: { ticks: { font: { size: 9 }, maxRotation: 45 } } }
+    }
+  });
+
+  document.getElementById('risultato').classList.remove('hidden');
+  document.getElementById('risultato').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+caricaCampi();
+</script>
+{% endblock %}

@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}Calcolo HCP di gioco — Il mio golf{% endblock %}
+{% block main_class %}{% endblock %}
+
+{% block content %}
+<div class="bg-green-800 text-white px-4 py-4 sticky top-14 z-30 shadow">
+  <h2 class="text-lg font-bold">Calcolo Handicap di gioco</h2>
+  <p class="text-green-300 text-xs">Formula WHS: HCP Index × (SR/113) + (CR − Par)</p>
+</div>
+
+<div class="max-w-lg mx-auto px-4 py-5 space-y-4">
+
+  {% if hcp_attuale %}
+  <div class="bg-white rounded-2xl shadow p-4 flex items-center gap-4">
+    <div class="text-3xl font-bold text-green-800">{{ hcp_attuale }}</div>
+    <div>
+      <p class="text-xs text-gray-400 font-semibold uppercase tracking-wide">HCP Index attuale</p>
+      <p class="text-sm text-gray-500">dall'ultima gara registrata</p>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Form selettori -->
+  <div class="bg-white rounded-2xl shadow p-5 space-y-4">
+
+    <div>
+      <label class="block text-sm font-semibold text-gray-700 mb-1.5">Campo</label>
+      <select id="selCampo" onchange="caricaPercorsi()"
+              class="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm bg-white
+                     focus:outline-none focus:ring-2 focus:ring-green-500 min-h-[48px]">
+        <option value="">— Seleziona il campo —</option>
+      </select>
+    </div>
+
+    <div>
+      <label class="block text-sm font-semibold text-gray-700 mb-1.5">Percorso / Tee</label>
+      <select id="selTee" onchange="aggiornaCrSr()"
+              class="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm bg-white
+                     focus:outline-none focus:ring-2 focus:ring-green-500 min-h-[48px]"
+              disabled>
+        <option value="">— Prima seleziona il campo —</option>
+      </select>
+    </div>
+
+    <!-- CR / SR -->
+    <div class="flex gap-3">
+      <div class="flex-1 bg-gray-50 rounded-xl p-3 text-center">
+        <p class="text-xs text-gray-400 font-semibold uppercase tracking-wide">CR</p>
+        <p id="valCR" class="text-2xl font-bold text-gray-800">—</p>
+      </div>
+      <div class="flex-1 bg-gray-50 rounded-xl p-3 text-center">
+        <p class="text-xs text-gray-400 font-semibold uppercase tracking-wide">SR</p>
+        <p id="valSR" class="text-2xl font-bold text-gray-800">—</p>
+      </div>
+      <div class="flex-1 bg-gray-50 rounded-xl p-3 text-center">
+        <p class="text-xs text-gray-400 font-semibold uppercase tracking-wide">Par</p>
+        <p id="valPar" class="text-2xl font-bold text-gray-800">—</p>
+      </div>
+    </div>
+
+    <div>
+      <label class="block text-sm font-semibold text-gray-700 mb-1.5">HCP Index</label>
+      <input id="inpHcp" type="number" step="0.1" min="0" max="54"
+             value="{{ hcp_attuale or '' }}"
+             placeholder="es. 18.5"
+             class="w-full border border-gray-300 rounded-xl px-4 py-3 text-base
+                    focus:outline-none focus:ring-2 focus:ring-green-500 min-h-[48px]"
+             oninput="calcola()">
+    </div>
+
+    <!-- Risultato -->
+    <div id="risultato" class="hidden bg-green-700 text-white rounded-2xl p-5 text-center">
+      <p class="text-green-300 text-xs font-semibold uppercase tracking-wide mb-1">Playing Handicap</p>
+      <p id="valResult" class="text-5xl font-bold"></p>
+      <p id="valFormula" class="text-green-300 text-xs mt-2"></p>
+    </div>
+
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let ratingsData = [];
+let crVal = null, srVal = null, parVal = null;
+
+async function caricaCampi() {
+  const resp = await fetch('/api/campi');
+  const campi = await resp.json();
+  const sel = document.getElementById('selCampo');
+  campi.forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c.id;
+    opt.textContent = c.nome + (c.citta ? ` (${c.citta})` : '');
+    sel.appendChild(opt);
+  });
+}
+
+async function caricaPercorsi() {
+  const campoId = document.getElementById('selCampo').value;
+  const selTee = document.getElementById('selTee');
+  crVal = srVal = parVal = null;
+  document.getElementById('valCR').textContent = '—';
+  document.getElementById('valSR').textContent = '—';
+  document.getElementById('valPar').textContent = '—';
+  document.getElementById('risultato').classList.add('hidden');
+
+  if (!campoId) { selTee.disabled = true; selTee.innerHTML = '<option>— Prima seleziona il campo —</option>'; return; }
+
+  const resp = await fetch(`/api/campi_rating?campo_id=${campoId}`);
+  ratingsData = await resp.json();
+
+  selTee.innerHTML = '<option value="">— Seleziona percorso/tee —</option>';
+  ratingsData.forEach(r => {
+    const opt = document.createElement('option');
+    opt.value = r.id;
+    const genLabel = r.genere === 'M' ? 'Uomini' : r.genere === 'F' ? 'Donne' : r.genere;
+    opt.textContent = `${r.percorso || '18 Buche'} · ${genLabel} · ${r.tee_colore} · CR ${r.cr} / SR ${r.sr}`;
+    selTee.appendChild(opt);
+  });
+  selTee.disabled = false;
+}
+
+function aggiornaCrSr() {
+  const ratingId = parseInt(document.getElementById('selTee').value);
+  const r = ratingsData.find(x => x.id === ratingId);
+  if (r) {
+    crVal = r.cr; srVal = r.sr; parVal = r.par;
+    document.getElementById('valCR').textContent = r.cr ?? '—';
+    document.getElementById('valSR').textContent = r.sr ?? '—';
+    document.getElementById('valPar').textContent = r.par ?? '—';
+  } else {
+    crVal = srVal = parVal = null;
+    document.getElementById('valCR').textContent = '—';
+    document.getElementById('valSR').textContent = '—';
+    document.getElementById('valPar').textContent = '—';
+  }
+  calcola();
+}
+
+function calcola() {
+  const hcp = parseFloat(document.getElementById('inpHcp').value);
+  const res = document.getElementById('risultato');
+  if (isNaN(hcp) || crVal === null || srVal === null || parVal === null) {
+    res.classList.add('hidden'); return;
+  }
+  const playingHcp = Math.round(hcp * (srVal / 113) + (crVal - parVal));
+  document.getElementById('valResult').textContent = playingHcp;
+  document.getElementById('valFormula').textContent =
+    `${hcp} × (${srVal}/113) + (${crVal} − ${parVal}) = ${playingHcp}`;
+  res.classList.remove('hidden');
+}
+
+caricaCampi();
+</script>
+{% endblock %}

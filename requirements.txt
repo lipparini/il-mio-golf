@@ -1,0 +1,11 @@
+flask==3.0.3
+flask-login==0.6.3
+bcrypt==4.2.0
+cryptography==42.0.8
+psycopg2-binary==2.9.9
+playwright==1.49.0
+apscheduler==3.10.4
+gunicorn==22.0.0
+requests==2.32.3
+beautifulsoup4==4.12.3
+python-dotenv==1.0.1
