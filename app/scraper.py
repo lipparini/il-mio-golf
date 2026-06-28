@@ -11,12 +11,45 @@ import requests
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
-from .models import save_records, save_campo, save_campo_ratings
+from .models import (save_records, save_campo, save_campo_ratings,
+                     update_campo_details, get_campi_with_club_id)
 
 DATE_RE = re.compile(r"^\d{2}/\d{2}/\d{4}$")
-BASE_URL = "https://areariservata.federgolf.it"
+BASE_URL          = "https://areariservata.federgolf.it"
 HANDICAP_PAGE_URL = "https://www.federgolf.it/settore-tecnico/calcolo-hcp/"
-AJAX_URL = "https://www.federgolf.it/wp-admin/admin-ajax.php"
+AJAX_URL          = "https://www.federgolf.it/wp-admin/admin-ajax.php"
+REGIONI_AJAX_URL  = "https://www.federgolf.it/?ajax-request=jnews"
+DETAIL_BASE_URL   = "https://www.federgolf.it/dettaglio-golf-club/"
+
+_FEDERGOLF_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Referer": "https://www.federgolf.it/",
+    "Origin":  "https://www.federgolf.it",
+}
+
+_REGIONI_URLS = [
+    ("Abruzzo",               "https://www.federgolf.it/regioni/abruzzo/"),
+    ("Basilicata",            "https://www.federgolf.it/regioni/basilicata/"),
+    ("Calabria",              "https://www.federgolf.it/regioni/calabria/"),
+    ("Campania",              "https://www.federgolf.it/regioni/campania/"),
+    ("Emilia-Romagna",        "https://www.federgolf.it/regioni/emilia-romagna/"),
+    ("Friuli-Venezia Giulia", "https://www.federgolf.it/regioni/friuli-venezia-giulia/"),
+    ("Lazio",                 "https://www.federgolf.it/regioni/lazio/"),
+    ("Liguria",               "https://www.federgolf.it/regioni/liguria/"),
+    ("Lombardia",             "https://www.federgolf.it/regioni/lombardia/"),
+    ("Marche",                "https://www.federgolf.it/regioni/marche/"),
+    ("Molise",                "https://www.federgolf.it/regioni/molise/"),
+    ("Piemonte",              "https://www.federgolf.it/regioni/piemonte/"),
+    ("Puglia",                "https://www.federgolf.it/regioni/puglia/"),
+    ("Sardegna",              "https://www.federgolf.it/regioni/sardegna/"),
+    ("Sicilia",               "https://www.federgolf.it/regioni/sicilia/"),
+    ("Toscana",               "https://www.federgolf.it/regioni/toscana/"),
+    ("Trentino-Alto Adige",   "https://www.federgolf.it/regioni/trentino-alto-adige/"),
+    ("Umbria",                "https://www.federgolf.it/regioni/umbria/"),
+    ("Valle d'Aosta",         "https://www.federgolf.it/regioni/valle-d-aosta/"),
+    ("Veneto",                "https://www.federgolf.it/regioni/veneto/"),
+]
 
 
 def log(msg: str):
@@ -245,6 +278,228 @@ def scrape_and_save(username: str, password: str, utente_id: int) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Scraper geografico — federgolf.it/regioni/ (fase 1)
+# ---------------------------------------------------------------------------
+
+def _parse_address(raw: str) -> tuple[str, str]:
+    """Estrae (citta, provincia) da un indirizzo Federgolf tipo '(12345) CITTÀ PV'."""
+    raw = raw.strip()
+    m = re.search(r'\(\d{5}\)\s+(.+?)\s+([A-Z]{2})\s*$', raw)
+    return (m.group(1).strip(), m.group(2).strip()) if m else ("", "")
+
+
+def _extract_regione_id(html_text: str) -> str | None:
+    """Estrae il GUID regione_id dal HTML della pagina regionale (per la paginazione AJAX)."""
+    m = re.search(r'"regione_id":"([a-f0-9\-]{36})"', html_text)
+    if not m:
+        m = re.search(r'regione_id\\":\\"([a-f0-9\-]{36})', html_text)
+    return m.group(1) if m else None
+
+
+def _parse_clubs_geografici(html_text: str, regione_nome: str) -> list[dict]:
+    """
+    Parsa gli articoli .jeg_post_module_37_fig dal HTML.
+    Ritorna lista di dict {nome, regione, indirizzo, citta, provincia, club_id}.
+    """
+    soup = BeautifulSoup(html_text, "html.parser")
+    clubs = []
+    for art in soup.find_all("article", class_="jeg_post_module_37_fig"):
+        strong = art.find("strong")
+        nome = strong.get_text(strip=True) if strong else ""
+        if not nome:
+            continue
+        spans = art.find_all("span", class_="jeg_post_module_37_fig_icon_text")
+        indirizzo = spans[0].get_text(strip=True) if spans else ""
+        citta, provincia = _parse_address(indirizzo)
+        # club_id dal link "Scopri di più" (?club_id=<GUID>)
+        club_id = None
+        link = art.find("a", href=re.compile(r'club_id='))
+        if link:
+            m = re.search(r'club_id=([a-f0-9\-]{36})', link.get("href", ""))
+            if m:
+                club_id = m.group(1)
+        clubs.append({
+            "nome":      nome,
+            "regione":   regione_nome,
+            "indirizzo": indirizzo,
+            "citta":     citta,
+            "provincia": provincia,
+            "club_id":   club_id,
+        })
+    return clubs
+
+
+def _scrape_regione_clubs(sess: requests.Session, regione_nome: str, page_url: str) -> list[dict]:
+    """Scarica tutti i club di una regione con paginazione AJAX 'Load More'."""
+    try:
+        r = sess.get(page_url, timeout=30)
+        r.raise_for_status()
+    except Exception as e:
+        log(f"  [{regione_nome}] ERRORE fetch: {e}")
+        return []
+
+    regione_id = _extract_regione_id(r.text)
+    all_clubs  = _parse_clubs_geografici(r.text, regione_nome)
+
+    if not regione_id:
+        log(f"  [{regione_nome}] {len(all_clubs)} club (regione_id non trovato, no paginazione)")
+        return all_clubs
+
+    page_num = 2
+    while True:
+        time.sleep(0.3)
+        ajax_data = {
+            "lang":                                          "it_IT",
+            "action":                                        "jnews_module_ajax_jnews_block_37",
+            "module":                                        "true",
+            "data[filter]":                                  "0",
+            "data[filter_type]":                             "all",
+            "data[current_page]":                            str(page_num),
+            "data[attribute][post_type]":                    "post",
+            "data[attribute][content_type]":                 "all",
+            "data[attribute][number_post]":                  "6",
+            "data[attribute][sort_by]":                      "latest",
+            "data[attribute][pagination_mode]":              "loadmore",
+            "data[attribute][pagination_number_post][size]": "4",
+            "data[attribute][column_class]":                 "jeg_col_3o3",
+            "data[attribute][class]":                        "jnews_block_37",
+            "data[attribute][regione_id]":                   regione_id,
+            "data[attribute][paged]":                        "1",
+        }
+        try:
+            resp = sess.post(REGIONI_AJAX_URL, data=ajax_data, timeout=30)
+            resp.raise_for_status()
+            jdata = resp.json()
+        except Exception as e:
+            log(f"  [{regione_nome}] AJAX pagina {page_num} ERRORE: {e}")
+            break
+
+        content = jdata.get("content", "")
+        if not content or content.strip() in ("", "false", "null"):
+            break
+
+        all_clubs.extend(_parse_clubs_geografici(content, regione_nome))
+
+        if not jdata.get("next", False):
+            break
+        page_num += 1
+
+    with_id = sum(1 for c in all_clubs if c.get("club_id"))
+    log(f"  [{regione_nome}] {len(all_clubs)} club ({with_id} con club_id)")
+    return all_clubs
+
+
+def scrape_regioni_geografiche() -> dict:
+    """
+    Fase 1: scraping geografico da federgolf.it/regioni/ (20 regioni, ~341 circoli).
+    Inserisce/aggiorna nome, regione, citta, provincia, indirizzo, club_id.
+    """
+    stats = {"upsert": 0, "errori": 0}
+    log("=== Fase 1: scraping geografico (20 regioni) ===")
+
+    sess = requests.Session()
+    sess.headers.update(_FEDERGOLF_HEADERS)
+
+    for regione_nome, page_url in _REGIONI_URLS:
+        clubs = _scrape_regione_clubs(sess, regione_nome, page_url)
+        for club in clubs:
+            try:
+                if save_campo(club):
+                    stats["upsert"] += 1
+                else:
+                    stats["errori"] += 1
+            except Exception as e:
+                log(f"  ERRORE DB '{club.get('nome')}': {e}")
+                stats["errori"] += 1
+        time.sleep(0.8)
+
+    log(f"=== Fase 1 completata: {stats} ===")
+    return stats
+
+
+# ---------------------------------------------------------------------------
+# Scraper dettaglio — federgolf.it/dettaglio-golf-club/ (fase 2)
+# ---------------------------------------------------------------------------
+
+def _parse_detail_page(html_text: str) -> dict:
+    """
+    Estrae buche_tot, telefono, email, sito_web dalla pagina dettaglio circolo.
+    Struttura HTML: <div class="tabella-dettagli-container">
+                      <div class="tabella-dettagli-label">Telefono</div>
+                      <div class="tabella-dettagli-value">...</div>
+                    </div>
+    """
+    soup = BeautifulSoup(html_text, "html.parser")
+    data = {}
+    for container in soup.find_all("div", class_="tabella-dettagli-container"):
+        label_el = container.find("div", class_="tabella-dettagli-label")
+        value_el = container.find("div", class_="tabella-dettagli-value")
+        if not label_el or not value_el:
+            continue
+        label = label_el.get_text(strip=True)
+        if label == "Numero buche":
+            val = value_el.get_text(strip=True)
+            if val and val.isdigit():
+                data["buche_tot"] = val
+        elif label == "Telefono":
+            val = value_el.get_text(strip=True)
+            if val:
+                data["telefono"] = val
+        elif label == "E-mail":
+            a = value_el.find("a", href=re.compile(r'^mailto:'))
+            if a:
+                data["email"] = a["href"].replace("mailto:", "").strip()
+            else:
+                val = value_el.get_text(strip=True)
+                if "@" in val:
+                    data["email"] = val
+        elif label == "Sito web":
+            a = value_el.find("a", href=True)
+            if a and a["href"].startswith("http"):
+                data["sito_web"] = a["href"].rstrip("/")
+            else:
+                val = value_el.get_text(strip=True)
+                if val.startswith("http"):
+                    data["sito_web"] = val.rstrip("/")
+    return data
+
+
+def scrape_details() -> dict:
+    """
+    Fase 2: scraping pagine dettaglio per tutti i circoli con club_id nel DB.
+    Aggiorna buche_tot, telefono, email, sito_web.
+    """
+    stats = {"aggiornati": 0, "vuoti": 0, "errori": 0}
+    log("=== Fase 2: scraping dettaglio circoli ===")
+
+    campi = get_campi_with_club_id()
+    log(f"  {len(campi)} circoli con club_id nel DB.")
+
+    sess = requests.Session()
+    sess.headers.update(_FEDERGOLF_HEADERS)
+
+    for i, campo in enumerate(campi, 1):
+        if i % 50 == 0 or i == 1:
+            log(f"  [{i}/{len(campi)}] aggiornati={stats['aggiornati']} errori={stats['errori']}")
+        try:
+            url = f"{DETAIL_BASE_URL}?club_id={campo['club_id']}"
+            r = sess.get(url, timeout=30)
+            r.raise_for_status()
+            detail = _parse_detail_page(r.text)
+            if update_campo_details(campo["id"], detail):
+                stats["aggiornati"] += 1
+            else:
+                stats["vuoti"] += 1
+        except Exception as e:
+            log(f"  [{i}] {campo['nome']}: ERRORE — {e}")
+            stats["errori"] += 1
+        time.sleep(0.3)
+
+    log(f"=== Fase 2 completata: {stats} ===")
+    return stats
+
+
+# ---------------------------------------------------------------------------
 # Scraper campi — API pubblica (condivisa, nessun utente_id)
 # ---------------------------------------------------------------------------
 
@@ -437,4 +692,24 @@ def scrape_campi_api() -> dict:
             stats["errori"] += 1
 
     log(f"API campi completato: {stats}")
+    return stats
+
+
+def scrape_campi_completo() -> dict:
+    """
+    Scraping completo campi in 3 fasi sequenziali:
+    1. Geografico:  ~341 circoli da federgolf.it/regioni/
+                    → nome, regione, citta, provincia, indirizzo, club_id
+    2. Dettaglio:   ~339 circoli con club_id
+                    → buche_tot, telefono, email, sito_web
+    3. CR/SR API:   ~223 circoli dall'API admin-ajax.php
+                    → campi_rating (percorso, tee, CR, SR, par)
+    """
+    log("=== scrape_campi_completo: inizio ===")
+    stats = {
+        "fase1": scrape_regioni_geografiche(),
+        "fase2": scrape_details(),
+        "fase3": scrape_campi_api(),
+    }
+    log(f"=== scrape_campi_completo: terminato — {stats} ===")
     return stats

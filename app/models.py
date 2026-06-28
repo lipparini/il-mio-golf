@@ -450,24 +450,25 @@ def save_campo(campo: dict) -> int | None:
     nome = (campo.get("nome") or "").strip()
     if not nome:
         return None
+    club_id = (campo.get("club_id") or "").strip() or None
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO campi (nome, citta, regione, provincia, buche_tot, par_tot,
-                                   indirizzo, telefono, email, sito_web, aggiornato_al)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+                                   indirizzo, telefono, email, sito_web, club_id, aggiornato_al)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
                 ON CONFLICT (nome) DO UPDATE SET
-                    citta=EXCLUDED.citta,
-                    regione=CASE WHEN campi.regione IS NOT NULL AND campi.regione <> ''
-                                 THEN campi.regione ELSE EXCLUDED.regione END,
-                    provincia=EXCLUDED.provincia,
-                    buche_tot=EXCLUDED.buche_tot,
-                    par_tot=EXCLUDED.par_tot,
-                    indirizzo=EXCLUDED.indirizzo,
-                    telefono=EXCLUDED.telefono,
-                    email=EXCLUDED.email,
-                    sito_web=EXCLUDED.sito_web,
-                    aggiornato_al=NOW()
+                    citta     = COALESCE(NULLIF(EXCLUDED.citta,''),     campi.citta),
+                    regione   = COALESCE(NULLIF(EXCLUDED.regione,''),   campi.regione),
+                    provincia = COALESCE(NULLIF(EXCLUDED.provincia,''), campi.provincia),
+                    buche_tot = COALESCE(NULLIF(EXCLUDED.buche_tot,''), campi.buche_tot),
+                    par_tot   = COALESCE(NULLIF(EXCLUDED.par_tot,''),   campi.par_tot),
+                    indirizzo = COALESCE(NULLIF(EXCLUDED.indirizzo,''), campi.indirizzo),
+                    telefono  = COALESCE(NULLIF(EXCLUDED.telefono,''),  campi.telefono),
+                    email     = COALESCE(NULLIF(EXCLUDED.email,''),     campi.email),
+                    sito_web  = COALESCE(NULLIF(EXCLUDED.sito_web,''),  campi.sito_web),
+                    club_id   = COALESCE(EXCLUDED.club_id,              campi.club_id),
+                    aggiornato_al = NOW()
                 RETURNING id
             """, (
                 nome,
@@ -475,11 +476,43 @@ def save_campo(campo: dict) -> int | None:
                 campo.get("provincia", ""), campo.get("buche_tot", ""),
                 campo.get("par_tot", ""), campo.get("indirizzo", ""),
                 campo.get("telefono", ""), campo.get("email", ""),
-                campo.get("sito_web", ""),
+                campo.get("sito_web", ""), club_id,
             ))
             row = cur.fetchone()
             conn.commit()
             return row[0] if row else None
+
+
+def update_campo_details(campo_id: int, detail: dict) -> bool:
+    """Aggiorna buche_tot, telefono, email, sito_web — solo i campi non vuoti."""
+    fields, vals = [], []
+    for col in ("buche_tot", "telefono", "email", "sito_web"):
+        if detail.get(col):
+            fields.append(f"{col} = %s")
+            vals.append(detail[col])
+    if not fields:
+        return False
+    vals.append(campo_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"UPDATE campi SET {', '.join(fields)}, aggiornato_al=NOW() WHERE id = %s",
+                vals,
+            )
+        conn.commit()
+    return True
+
+
+def get_campi_with_club_id() -> list[dict]:
+    """Ritorna tutti i campi con club_id valorizzato (per lo scraping dettaglio)."""
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("""
+                SELECT id, nome, club_id FROM campi
+                WHERE club_id IS NOT NULL AND club_id <> ''
+                ORDER BY nome
+            """)
+            return [dict(r) for r in cur.fetchall()]
 
 
 def save_campo_ratings(campo_id: int, ratings: list[dict]) -> int:

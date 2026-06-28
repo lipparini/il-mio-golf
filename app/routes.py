@@ -68,19 +68,25 @@ def _run_scrape_for_user(app, utente_id: int, username: str, password: str):
 
 
 def _run_scrape_campi():
-    from .scraper import scrape_campi_api
+    from .scraper import scrape_campi_completo
     with _campi_lock:
         _campi_state["status"] = "running"
-        _campi_state["message"] = "Scraping campi in corso..."
+        _campi_state["message"] = "Scraping campi in corso (fase 1/3: geografico)..."
     try:
-        stats = scrape_campi_api()
-        msg = f"{stats['campi']} campi, {stats['ratings']} rating aggiornati."
-        if stats["errori"]:
-            msg += f" ({stats['errori']} errori)"
+        stats = scrape_campi_completo()
+        f3 = stats.get("fase3", {})
+        f1 = stats.get("fase1", {})
+        n_campi   = f1.get("upsert", 0)
+        n_ratings = f3.get("ratings", 0)
+        n_errori  = (f1.get("errori", 0) + stats.get("fase2", {}).get("errori", 0)
+                     + f3.get("errori", 0))
+        msg = f"{n_campi} campi geografici, {n_ratings} rating CR/SR aggiornati."
+        if n_errori:
+            msg += f" ({n_errori} errori totali)"
         with _campi_lock:
             _campi_state.update({"status": "done", "message": msg,
-                                  "added_campi": stats["campi"],
-                                  "added_ratings": stats["ratings"],
+                                  "added_campi": n_campi,
+                                  "added_ratings": n_ratings,
                                   "last_run": datetime.now().isoformat(timespec="seconds")})
     except Exception as exc:
         with _campi_lock:
