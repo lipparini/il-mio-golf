@@ -265,4 +265,6 @@ flask --app "app:create_app()" run --debug
 | 2026-06-28 | Auth: Flask-Login + bcrypt + Fernet per credenziali Federgolf |
 | 2026-06-28 | Scheduler: APScheduler cron job notturno alle 3:00 |
 | 2026-06-28 | UI: template mobile-first con hamburger menu, Tailwind CDN |
-| 2026-06-28 | Deploy: railway.toml + nixpacks.toml per installazione Playwright |
+| 2026-06-28 | Deploy: railway.toml + nixpacks.toml → Dockerfile (fix Playwright su Railway) |
+| 2026-06-28 | Fix porta: ${PORT:-8080} in Dockerfile CMD, nessun startCommand in railway.toml |
+| 2026-06-28 | Fix scraper campi: _api_post_with_retry (3 tentativi, backoff 2s/4s), timeout 30s, log dettagliato per circolo, pausa 0.3s tra richieste |
