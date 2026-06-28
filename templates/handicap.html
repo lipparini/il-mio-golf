@@ -86,15 +86,27 @@ let ratingsData = [];
 let crVal = null, srVal = null, parVal = null;
 
 async function caricaCampi() {
-  const resp = await fetch('/api/campi');
-  const campi = await resp.json();
-  const sel = document.getElementById('selCampo');
-  campi.forEach(c => {
-    const opt = document.createElement('option');
-    opt.value = c.id;
-    opt.textContent = c.nome + (c.citta ? ` (${c.citta})` : '');
-    sel.appendChild(opt);
-  });
+  try {
+    const resp = await fetch('/api/campi');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const campi = await resp.json();
+    if (!Array.isArray(campi)) throw new Error(campi.error || 'risposta non valida');
+    const sel = document.getElementById('selCampo');
+    if (campi.length === 0) {
+      sel.innerHTML = '<option value="">— Nessun campo disponibile (esegui aggiornamento) —</option>';
+      return;
+    }
+    campi.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = c.nome + (c.citta ? ` (${c.citta})` : '');
+      sel.appendChild(opt);
+    });
+  } catch (e) {
+    document.getElementById('selCampo').innerHTML =
+      `<option value="">— Errore caricamento campi —</option>`;
+    console.error('caricaCampi error:', e);
+  }
 }
 
 async function caricaPercorsi() {
