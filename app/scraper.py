@@ -543,10 +543,18 @@ def _api_get_percorsi(session, club_id: str) -> list[dict]:
     return result
 
 
+_diag_logged = False  # logga risposta raw API solo per il primo circolo
+
+
 def _api_get_tees(session, percorso_id) -> list[str]:
+    global _diag_logged
     r = _api_post_with_retry(session, {"action": "courses-tees", "percorso_id": str(percorso_id)})
     data = r.json()
+    if not _diag_logged:
+        log(f"  DIAG tees raw (percorso_id={percorso_id}): {repr(data)[:300]}")
     if not isinstance(data, list):
+        if not _diag_logged:
+            log(f"  DIAG tees: risposta non è lista (type={type(data).__name__}), ritorno []")
         return []
     tees = []
     for item in data:
@@ -554,10 +562,15 @@ def _api_get_tees(session, percorso_id) -> list[str]:
             tees.append(str(item[0]))
         elif isinstance(item, str):
             tees.append(item)
+        elif isinstance(item, int):
+            tees.append(str(item))
+    if not _diag_logged:
+        log(f"  DIAG tees parsed: {tees}")
     return tees
 
 
 def _api_get_cr_sr(session, club_id: str, percorso_id, tee: str):
+    global _diag_logged
     r = _api_post_with_retry(session, {
         "action": "course-handicap",
         "club_id": club_id,
@@ -566,12 +579,34 @@ def _api_get_cr_sr(session, club_id: str, percorso_id, tee: str):
         "handicap": "18.0",
     })
     data = r.json()
-    if not data or not isinstance(data, list) or not isinstance(data[0], (list, tuple)):
+    if not _diag_logged:
+        log(f"  DIAG cr_sr raw (club={club_id} perc={percorso_id} tee={tee}): {repr(data)[:300]}")
+    if not data:
+        if not _diag_logged:
+            log("  DIAG cr_sr: risposta vuota")
+        return None, None, None, None, None
+    if not isinstance(data, list):
+        if not _diag_logged:
+            log(f"  DIAG cr_sr: risposta non è lista (type={type(data).__name__}): {repr(data)[:200]}")
         return None, None, None, None, None
     row = data[0]
-    if len(row) < 3:
-        return None, None, None, None, None
-    return row[1], row[2], row[3] if len(row) > 3 else None, row[4] if len(row) > 4 else None, row[0]
+    if not _diag_logged:
+        log(f"  DIAG cr_sr data[0] type={type(row).__name__}: {repr(row)[:200]}")
+    # Supporta sia lista/tupla che dict
+    if isinstance(row, (list, tuple)):
+        if len(row) < 3:
+            return None, None, None, None, None
+        return row[1], row[2], row[3] if len(row) > 3 else None, row[4] if len(row) > 4 else None, row[0]
+    if isinstance(row, dict):
+        cr  = row.get("cr") or row.get("CR") or row.get("course_rating")
+        sr  = row.get("sr") or row.get("SR") or row.get("slope_rating")
+        par = row.get("par") or row.get("PAR")
+        buche  = row.get("buche") or row.get("holes")
+        genere = row.get("genere") or row.get("gender") or row.get("sex")
+        return cr, sr, par, buche, genere
+    if not _diag_logged:
+        log(f"  DIAG cr_sr: formato sconosciuto data[0]={repr(row)[:100]}")
+    return None, None, None, None, None
 
 
 def scrape_campi_api() -> dict:
@@ -633,10 +668,14 @@ def scrape_campi_api() -> dict:
                     stats["errori"] += 1
                     continue
 
+                if not tees:
+                    log(f"    [{i}] {nome} / '{perc_nome}': nessun tee trovato")
+
                 for tee in tees:
                     try:
                         cr, sr, par, buche, genere = _api_get_cr_sr(session, club_id, perc_id, tee)
                         if cr is None and sr is None:
+                            log(f"    [{i}] {nome} / '{perc_nome}' / tee={tee}: CR/SR None, skip")
                             continue
                         if not genere:
                             genere = _TEE_GENERE_API.get(tee.upper(), "M")
@@ -651,6 +690,7 @@ def scrape_campi_api() -> dict:
                                     buche = 18
                             else:
                                 buche = 18
+                        log(f"    Salvato rating: campo={nome} percorso={perc_nome} tee={tee} CR={cr} SR={sr}")
                         ratings_batch.append({
                             "percorso": perc_nome,
                             "tee_colore": tee,
@@ -663,10 +703,14 @@ def scrape_campi_api() -> dict:
                         stats["errori"] += 1
 
             if ratings_batch:
-                stats["ratings"] += save_campo_ratings(campo_id, ratings_batch)
-            log(f"  [{i}] {nome}: {len(percorsi)} percorsi, {len(ratings_batch)} rating salvati.")
+                saved = save_campo_ratings(campo_id, ratings_batch)
+                log(f"  [{i}] {nome}: save_campo_ratings ritornato {saved} (batch={len(ratings_batch)})")
+                stats["ratings"] += saved
+            else:
+                log(f"  [{i}] {nome}: ratings_batch vuota, nulla da salvare")
+            log(f"  [{i}] {nome}: {len(percorsi)} percorsi, {len(ratings_batch)} rating.")
 
-            # Piccola pausa per non sovraccaricare il server
+            _diag_logged = True  # dopo il primo circolo completo, disattiva i log raw
             time.sleep(0.3)
 
         except Exception as e:
