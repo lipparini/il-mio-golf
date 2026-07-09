@@ -530,6 +530,10 @@ def _api_post_with_retry(session, data: dict, max_attempts: int = 3) -> requests
 
 
 def _api_get_percorsi(session, club_id: str) -> list[dict]:
+    """
+    Risposta API: [{"percorso_id": "<guid>", "nome_percorso": "18 Buche Par 71"}, ...]
+    Normalizza in {"id": ..., "nome": ...} per il resto del codice.
+    """
     r = _api_post_with_retry(session, {"action": "club-courses", "club_id": club_id})
     data = r.json()
     if not isinstance(data, list):
@@ -537,24 +541,22 @@ def _api_get_percorsi(session, club_id: str) -> list[dict]:
     result = []
     for item in data:
         if isinstance(item, dict):
-            result.append(item)
+            pid  = item.get("percorso_id") or item.get("id") or item.get("ID") or item.get("term_id")
+            nome = item.get("nome_percorso") or item.get("nome") or item.get("name") or item.get("post_title") or str(pid)
+            if pid:
+                result.append({"id": pid, "nome": nome})
         elif isinstance(item, (list, tuple)) and len(item) >= 2:
             result.append({"id": item[0], "nome": item[1]})
     return result
 
 
-_diag_logged = False  # logga risposta raw API solo per il primo circolo
-
-
 def _api_get_tees(session, percorso_id) -> list[str]:
-    global _diag_logged
+    """
+    Risposta API: [["BIANCO","BIANCO"],["GIALLO","GIALLO"], ...]
+    """
     r = _api_post_with_retry(session, {"action": "courses-tees", "percorso_id": str(percorso_id)})
     data = r.json()
-    if not _diag_logged:
-        log(f"  DIAG tees raw (percorso_id={percorso_id}): {repr(data)[:300]}")
     if not isinstance(data, list):
-        if not _diag_logged:
-            log(f"  DIAG tees: risposta non è lista (type={type(data).__name__}), ritorno []")
         return []
     tees = []
     for item in data:
@@ -564,13 +566,19 @@ def _api_get_tees(session, percorso_id) -> list[str]:
             tees.append(item)
         elif isinstance(item, int):
             tees.append(str(item))
-    if not _diag_logged:
-        log(f"  DIAG tees parsed: {tees}")
     return tees
 
 
 def _api_get_cr_sr(session, club_id: str, percorso_id, tee: str):
-    global _diag_logged
+    """
+    Risposta API: [["ACAYA - 18 Buche Par 71", 73.9, 136, "Bianco", 25, 0]]
+      row[0] = descrizione percorso (stringa)
+      row[1] = CR (float)
+      row[2] = SR (int)
+      row[3] = tee colore capitalizzato (non usato — viene da parametro)
+      row[4] = Playing HCP calcolato per HCP 18.0 (non è par)
+    Ritorna solo (cr, sr) — par e buche vengono estratti dal nome percorso nel loop.
+    """
     r = _api_post_with_retry(session, {
         "action": "course-handicap",
         "club_id": club_id,
@@ -579,34 +587,16 @@ def _api_get_cr_sr(session, club_id: str, percorso_id, tee: str):
         "handicap": "18.0",
     })
     data = r.json()
-    if not _diag_logged:
-        log(f"  DIAG cr_sr raw (club={club_id} perc={percorso_id} tee={tee}): {repr(data)[:300]}")
-    if not data:
-        if not _diag_logged:
-            log("  DIAG cr_sr: risposta vuota")
-        return None, None, None, None, None
-    if not isinstance(data, list):
-        if not _diag_logged:
-            log(f"  DIAG cr_sr: risposta non è lista (type={type(data).__name__}): {repr(data)[:200]}")
-        return None, None, None, None, None
+    if not data or not isinstance(data, list):
+        return None, None
     row = data[0]
-    if not _diag_logged:
-        log(f"  DIAG cr_sr data[0] type={type(row).__name__}: {repr(row)[:200]}")
-    # Supporta sia lista/tupla che dict
-    if isinstance(row, (list, tuple)):
-        if len(row) < 3:
-            return None, None, None, None, None
-        return row[1], row[2], row[3] if len(row) > 3 else None, row[4] if len(row) > 4 else None, row[0]
+    if isinstance(row, (list, tuple)) and len(row) >= 3:
+        return row[1], row[2]
     if isinstance(row, dict):
-        cr  = row.get("cr") or row.get("CR") or row.get("course_rating")
-        sr  = row.get("sr") or row.get("SR") or row.get("slope_rating")
-        par = row.get("par") or row.get("PAR")
-        buche  = row.get("buche") or row.get("holes")
-        genere = row.get("genere") or row.get("gender") or row.get("sex")
-        return cr, sr, par, buche, genere
-    if not _diag_logged:
-        log(f"  DIAG cr_sr: formato sconosciuto data[0]={repr(row)[:100]}")
-    return None, None, None, None, None
+        cr = row.get("cr") or row.get("CR") or row.get("course_rating")
+        sr = row.get("sr") or row.get("SR") or row.get("slope_rating")
+        return cr, sr
+    return None, None
 
 
 def scrape_campi_api() -> dict:
@@ -656,61 +646,50 @@ def scrape_campi_api() -> dict:
 
             ratings_batch = []
             for perc in percorsi:
-                perc_id = perc.get("id") or perc.get("ID") or perc.get("term_id")
-                perc_nome = perc.get("nome") or perc.get("name") or perc.get("post_title") or str(perc_id)
+                perc_id   = perc.get("id")
+                perc_nome = perc.get("nome") or str(perc_id)
                 if not perc_id:
                     continue
+
+                # Estrai par e buche dal nome percorso
+                # es. "18 Buche Par 71" → par=71, buche=18
+                # es. "Prime Nove" → par=None, buche=9
+                par_m = re.search(r'[Pp]ar\s*(\d+)', perc_nome)
+                par_from_nome = int(par_m.group(1)) if par_m else None
+                nome_lower = perc_nome.lower()
+                if "nove" in nome_lower or "prime" in nome_lower or "seconde" in nome_lower:
+                    buche_from_nome = 9
+                else:
+                    buche_from_nome = 18
 
                 try:
                     tees = _api_get_tees(session, perc_id)
                 except Exception as e:
-                    log(f"    [{i}] {nome} / percorso '{perc_nome}': ERRORE tees — {e}")
+                    log(f"    [{i}] {nome} / '{perc_nome}': ERRORE tees — {e}")
                     stats["errori"] += 1
                     continue
 
-                if not tees:
-                    log(f"    [{i}] {nome} / '{perc_nome}': nessun tee trovato")
-
                 for tee in tees:
                     try:
-                        cr, sr, par, buche, genere = _api_get_cr_sr(session, club_id, perc_id, tee)
-                        if cr is None and sr is None:
-                            log(f"    [{i}] {nome} / '{perc_nome}' / tee={tee}: CR/SR None, skip")
+                        cr, sr = _api_get_cr_sr(session, club_id, perc_id, tee)
+                        if cr is None or sr is None:
                             continue
-                        if not genere:
-                            genere = _TEE_GENERE_API.get(tee.upper(), "M")
-                        if buche is None:
-                            nome_lower = perc_nome.lower()
-                            if "nove" in nome_lower or "prime" in nome_lower or "seconde" in nome_lower:
-                                buche = 9
-                            elif par is not None:
-                                try:
-                                    buche = 9 if int(par) <= 40 else 18
-                                except (ValueError, TypeError):
-                                    buche = 18
-                            else:
-                                buche = 18
-                        log(f"    Salvato rating: campo={nome} percorso={perc_nome} tee={tee} CR={cr} SR={sr}")
+                        genere = _TEE_GENERE_API.get(tee.upper(), "M")
+                        log(f"    Salvato rating: campo={nome} percorso={perc_nome} tee={tee} CR={cr} SR={sr} par={par_from_nome}")
                         ratings_batch.append({
                             "percorso": perc_nome,
                             "tee_colore": tee,
                             "genere": genere,
-                            "buche": int(buche),
-                            "cr": cr, "sr": sr, "par": par,
+                            "buche": buche_from_nome,
+                            "cr": cr, "sr": sr, "par": par_from_nome,
                         })
                     except Exception as e:
                         log(f"    [{i}] {nome} / tee={tee}: ERRORE CR/SR — {e}")
                         stats["errori"] += 1
 
             if ratings_batch:
-                saved = save_campo_ratings(campo_id, ratings_batch)
-                log(f"  [{i}] {nome}: save_campo_ratings ritornato {saved} (batch={len(ratings_batch)})")
-                stats["ratings"] += saved
-            else:
-                log(f"  [{i}] {nome}: ratings_batch vuota, nulla da salvare")
+                stats["ratings"] += save_campo_ratings(campo_id, ratings_batch)
             log(f"  [{i}] {nome}: {len(percorsi)} percorsi, {len(ratings_batch)} rating.")
-
-            _diag_logged = True  # dopo il primo circolo completo, disattiva i log raw
             time.sleep(0.3)
 
         except Exception as e:
