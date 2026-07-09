@@ -271,3 +271,5 @@ flask --app "app:create_app()" run --debug
 | 2026-06-28 | Porting scrape_regioni.py + scrape_detail.py in app/scraper.py: scrape_campi_completo() con 3 fasi (geografico 341 circoli, dettaglio club_id/buche_tot/contatti, CR/SR API 223 circoli) |
 | 2026-06-28 | models.py: save_campo aggiornato con club_id + COALESCE su tutti i campi geografici; aggiunti update_campo_details() e get_campi_with_club_id() |
 | 2026-06-28 | Fix combo vuote: Dockerfile --workers 2 → 1 (bug critico: con 2 workers il polling status colpisce il worker sbagliato); caricaCampi() nei template ora ha try/catch + Array.isArray check |
+| 2026-07-09 | Fix campi_rating vuota: scrape_campi_api usa club_id dal DB (fase 1) invece di HTML scraping pagina handicap (la select viene caricata via JS, requests riceveva select vuota → 0 ratings, nessun errore) |
+| 2026-07-09 | Rimossa _api_get_clubs() (obsoleta); admin panel: pannello "Aggiorna campi" con trigger e polling stato; railway.toml: healthcheckPath / → /health |
