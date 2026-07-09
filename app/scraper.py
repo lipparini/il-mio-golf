@@ -389,18 +389,21 @@ def _scrape_regione_clubs(sess: requests.Session, regione_nome: str, page_url: s
     return all_clubs
 
 
-def scrape_regioni_geografiche() -> dict:
+def scrape_regioni_geografiche(progress_cb=None) -> dict:
     """
     Fase 1: scraping geografico da federgolf.it/regioni/ (20 regioni, ~341 circoli).
     Inserisce/aggiorna nome, regione, citta, provincia, indirizzo, club_id.
     """
     stats = {"upsert": 0, "errori": 0}
+    n_tot = len(_REGIONI_URLS)
     log("=== Fase 1: scraping geografico (20 regioni) ===")
 
     sess = requests.Session()
     sess.headers.update(_FEDERGOLF_HEADERS)
 
-    for regione_nome, page_url in _REGIONI_URLS:
+    for idx, (regione_nome, page_url) in enumerate(_REGIONI_URLS, 1):
+        if progress_cb:
+            progress_cb(f"Fase 1/3: geografico — {regione_nome} ({idx}/{n_tot}) · {stats['upsert']} circoli")
         clubs = _scrape_regione_clubs(sess, regione_nome, page_url)
         for club in clubs:
             try:
@@ -464,7 +467,7 @@ def _parse_detail_page(html_text: str) -> dict:
     return data
 
 
-def scrape_details() -> dict:
+def scrape_details(progress_cb=None) -> dict:
     """
     Fase 2: scraping pagine dettaglio per tutti i circoli con club_id nel DB.
     Aggiorna buche_tot, telefono, email, sito_web.
@@ -473,14 +476,17 @@ def scrape_details() -> dict:
     log("=== Fase 2: scraping dettaglio circoli ===")
 
     campi = get_campi_with_club_id()
-    log(f"  {len(campi)} circoli con club_id nel DB.")
+    n_tot = len(campi)
+    log(f"  {n_tot} circoli con club_id nel DB.")
 
     sess = requests.Session()
     sess.headers.update(_FEDERGOLF_HEADERS)
 
     for i, campo in enumerate(campi, 1):
         if i % 50 == 0 or i == 1:
-            log(f"  [{i}/{len(campi)}] aggiornati={stats['aggiornati']} errori={stats['errori']}")
+            log(f"  [{i}/{n_tot}] aggiornati={stats['aggiornati']} errori={stats['errori']}")
+        if progress_cb and (i % 50 == 0 or i == 1):
+            progress_cb(f"Fase 2/3: dettaglio circoli [{i}/{n_tot}]")
         try:
             url = f"{DETAIL_BASE_URL}?club_id={campo['club_id']}"
             r = sess.get(url, timeout=30)
@@ -599,7 +605,7 @@ def _api_get_cr_sr(session, club_id: str, percorso_id, tee: str):
     return None, None
 
 
-def scrape_campi_api() -> dict:
+def scrape_campi_api(progress_cb=None) -> dict:
     """
     Scraping CR/SR da API pubblica Federgolf (requests, NO Playwright).
     Usa i club_id già nel DB dalla fase 1 geografica — più robusto dello scraping HTML
@@ -614,7 +620,8 @@ def scrape_campi_api() -> dict:
         log(f"  ERRORE FATALE recupero circoli dal DB: {e}")
         return stats
 
-    log(f"  {len(clubs_db)} circoli con club_id nel DB.")
+    n_tot = len(clubs_db)
+    log(f"  {n_tot} circoli con club_id nel DB.")
     if not clubs_db:
         log("  Nessun circolo con club_id — esegui prima la fase 1 (geografico).")
         return stats
@@ -632,7 +639,9 @@ def scrape_campi_api() -> dict:
         nome     = club["nome"]
 
         if i % 10 == 0 or i == 1:
-            log(f"  [{i}/{len(clubs_db)}] campi={stats['campi']} rating={stats['ratings']} errori={stats['errori']}")
+            log(f"  [{i}/{n_tot}] campi={stats['campi']} rating={stats['ratings']} errori={stats['errori']}")
+            if progress_cb:
+                progress_cb(f"Fase 3/3: CR/SR — [{i}/{n_tot}] · {stats['ratings']} rating")
 
         try:
             percorsi = _api_get_percorsi(session, club_id)
@@ -700,21 +709,21 @@ def scrape_campi_api() -> dict:
     return stats
 
 
-def scrape_campi_completo() -> dict:
+def scrape_campi_completo(progress_cb=None) -> dict:
     """
     Scraping completo campi in 3 fasi sequenziali:
     1. Geografico:  ~341 circoli da federgolf.it/regioni/
                     → nome, regione, citta, provincia, indirizzo, club_id
     2. Dettaglio:   ~339 circoli con club_id
                     → buche_tot, telefono, email, sito_web
-    3. CR/SR API:   ~223 circoli dall'API admin-ajax.php
+    3. CR/SR API:   ~341 circoli dall'API admin-ajax.php
                     → campi_rating (percorso, tee, CR, SR, par)
     """
     log("=== scrape_campi_completo: inizio ===")
     stats = {
-        "fase1": scrape_regioni_geografiche(),
-        "fase2": scrape_details(),
-        "fase3": scrape_campi_api(),
+        "fase1": scrape_regioni_geografiche(progress_cb=progress_cb),
+        "fase2": scrape_details(progress_cb=progress_cb),
+        "fase3": scrape_campi_api(progress_cb=progress_cb),
     }
     log(f"=== scrape_campi_completo: terminato — {stats} ===")
     return stats

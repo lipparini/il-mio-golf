@@ -53,7 +53,7 @@
   <!-- Sezione admin campi -->
   <div class="mt-6 bg-white rounded-2xl shadow p-5">
     <h3 class="font-bold text-gray-800 mb-1">Aggiornamento campi da golf</h3>
-    <p class="text-xs text-gray-500 mb-4">Scraper geografico + dettaglio + CR/SR (3 fasi, ~10 minuti)</p>
+    <p class="text-xs text-gray-500 mb-4">Scraper geografico + dettaglio + CR/SR (3 fasi, ~20-30 minuti)</p>
 
     <div id="campiStatusBox" class="hidden mb-3 text-sm px-4 py-3 rounded-xl"></div>
 
@@ -79,7 +79,7 @@ async function avviaCampi() {
     const r = await fetch('/api/scraper/run_campi', { method: 'POST' });
     const d = await r.json();
     if (d.status === 'started' || d.status === 'already_running') {
-      mostraStatoCampi('running', 'Scraping campi in corso (3 fasi, ~10 min)...');
+      mostraStatoCampi('running', 'Avvio scraping campi (3 fasi, ~20-30 min)...');
       if (_campiPoll) clearInterval(_campiPoll);
       _campiPoll = setInterval(pollCampi, 5000);
     } else {

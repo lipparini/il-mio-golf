@@ -69,18 +69,23 @@ def _run_scrape_for_user(app, utente_id: int, username: str, password: str):
 
 def _run_scrape_campi():
     from .scraper import scrape_campi_completo
+
+    def _set_progress(msg: str):
+        with _campi_lock:
+            _campi_state["message"] = msg
+
     with _campi_lock:
         _campi_state["status"] = "running"
-        _campi_state["message"] = "Scraping campi in corso (fase 1/3: geografico)..."
+        _campi_state["message"] = "Avvio scraping campi..."
     try:
-        stats = scrape_campi_completo()
-        f3 = stats.get("fase3", {})
+        stats = scrape_campi_completo(progress_cb=_set_progress)
         f1 = stats.get("fase1", {})
+        f2 = stats.get("fase2", {})
+        f3 = stats.get("fase3", {})
         n_campi   = f1.get("upsert", 0)
         n_ratings = f3.get("ratings", 0)
-        n_errori  = (f1.get("errori", 0) + stats.get("fase2", {}).get("errori", 0)
-                     + f3.get("errori", 0))
-        msg = f"{n_campi} campi geografici, {n_ratings} rating CR/SR aggiornati."
+        n_errori  = f1.get("errori", 0) + f2.get("errori", 0) + f3.get("errori", 0)
+        msg = f"Completato: {n_campi} campi, {n_ratings} rating CR/SR salvati."
         if n_errori:
             msg += f" ({n_errori} errori totali)"
         with _campi_lock:
