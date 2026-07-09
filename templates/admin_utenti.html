@@ -49,5 +49,87 @@
     <a href="/admin/utenti/nuovo" class="text-yellow-700 hover:underline font-medium">Crea il primo utente</a>
   </div>
   {% endfor %}
+
+  <!-- Sezione admin campi -->
+  <div class="mt-6 bg-white rounded-2xl shadow p-5">
+    <h3 class="font-bold text-gray-800 mb-1">Aggiornamento campi da golf</h3>
+    <p class="text-xs text-gray-500 mb-4">Scraper geografico + dettaglio + CR/SR (3 fasi, ~10 minuti)</p>
+
+    <div id="campiStatusBox" class="hidden mb-3 text-sm px-4 py-3 rounded-xl"></div>
+
+    <button id="btnCampi" onclick="avviaCampi()"
+            class="bg-yellow-700 hover:bg-yellow-600 active:bg-yellow-800 text-white
+                   font-bold px-5 py-3 rounded-xl text-sm transition-colors touch-manipulation">
+      Aggiorna campi
+    </button>
+  </div>
+
 </div>
+
+{% block scripts %}
+<script>
+let _campiPoll = null;
+
+async function avviaCampi() {
+  const btn = document.getElementById('btnCampi');
+  btn.disabled = true;
+  btn.textContent = 'Avvio...';
+  try {
+    const r = await fetch('/api/scraper/run_campi', { method: 'POST' });
+    const d = await r.json();
+    if (d.status === 'started' || d.status === 'already_running') {
+      mostraStatoCampi('running', 'Scraping campi in corso (3 fasi, ~10 min)...');
+      if (_campiPoll) clearInterval(_campiPoll);
+      _campiPoll = setInterval(pollCampi, 5000);
+    } else {
+      mostraStatoCampi('error', d.message || JSON.stringify(d));
+      btn.disabled = false; btn.textContent = 'Aggiorna campi';
+    }
+  } catch (e) {
+    mostraStatoCampi('error', 'Errore di rete: ' + e.message);
+    btn.disabled = false; btn.textContent = 'Aggiorna campi';
+  }
+}
+
+async function pollCampi() {
+  try {
+    const r = await fetch('/api/scraper/status_campi');
+    const d = await r.json();
+    mostraStatoCampi(d.status, d.message || d.status);
+    if (d.status !== 'running') {
+      clearInterval(_campiPoll); _campiPoll = null;
+      const btn = document.getElementById('btnCampi');
+      btn.disabled = false; btn.textContent = 'Aggiorna campi';
+    }
+  } catch (e) { /* ignora errori di polling */ }
+}
+
+function mostraStatoCampi(status, msg) {
+  const box = document.getElementById('campiStatusBox');
+  box.classList.remove('hidden');
+  const cls = status === 'done'
+    ? 'bg-green-50 text-green-800 border border-green-200'
+    : status === 'error'
+    ? 'bg-red-50 text-red-800 border border-red-200'
+    : 'bg-yellow-50 text-yellow-800 border border-yellow-200';
+  box.className = `mb-3 text-sm px-4 py-3 rounded-xl ${cls}`;
+  box.textContent = msg;
+}
+
+// Controlla subito lo stato corrente al caricamento
+(async () => {
+  try {
+    const r = await fetch('/api/scraper/status_campi');
+    const d = await r.json();
+    if (d.status === 'running') {
+      mostraStatoCampi('running', d.message || 'Scraping in corso...');
+      document.getElementById('btnCampi').disabled = true;
+      document.getElementById('btnCampi').textContent = 'In corso...';
+      _campiPoll = setInterval(pollCampi, 5000);
+    } else if (d.last_run) {
+      mostraStatoCampi(d.status, d.message || d.status);
+    }
+  } catch (e) { /* ignora */ }
+})();
+</script>
 {% endblock %}

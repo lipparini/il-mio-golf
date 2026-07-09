@@ -509,19 +509,6 @@ _TEE_GENERE_API = {
 }
 
 
-def _api_get_clubs() -> list[dict]:
-    resp = requests.get(HANDICAP_PAGE_URL, timeout=30)
-    resp.raise_for_status()
-    soup = BeautifulSoup(resp.text, "html.parser")
-    sel = soup.find("select", {"id": "circolo"})
-    if not sel:
-        raise RuntimeError("Select #circolo non trovato")
-    return [
-        {"nome": o.text.strip(), "club_id": o.get("value", "").strip()}
-        for o in sel.find_all("option")
-        if o.get("value", "").strip()
-    ]
-
 
 def _api_post_with_retry(session, data: dict, max_attempts: int = 3) -> requests.Response:
     """POST all'AJAX API con retry su errori di rete (non su 4xx/5xx)."""
@@ -589,23 +576,23 @@ def _api_get_cr_sr(session, club_id: str, percorso_id, tee: str):
 
 def scrape_campi_api() -> dict:
     """
-    Scraping CR/SR da API pubblica Federgolf (requests + BeautifulSoup, NO Playwright).
-    Campi condivisi tra tutti gli utenti.
-
-    Nota: l'API handicap restituisce ~221-226 circoli (solo quelli con rating WHS).
-    I restanti ~115 circoli affiliati senza CR/SR non appaiono in questa API.
+    Scraping CR/SR da API pubblica Federgolf (requests, NO Playwright).
+    Usa i club_id già nel DB dalla fase 1 geografica — più robusto dello scraping HTML
+    della pagina handicap (che carica la select via JS).
     """
     stats = {"campi": 0, "ratings": 0, "errori": 0, "skip_no_percorsi": 0}
 
-    log("API campi: recupero lista circoli (NO Playwright — solo HTTP) ...")
+    log("API campi: recupero circoli con club_id dal database ...")
     try:
-        clubs = _api_get_clubs()
+        clubs_db = get_campi_with_club_id()
     except Exception as e:
-        log(f"  ERRORE FATALE recupero lista circoli: {e}")
+        log(f"  ERRORE FATALE recupero circoli dal DB: {e}")
         return stats
 
-    log(f"  {len(clubs)} circoli nell'API handicap Federgolf.")
-    log(f"  Nota: ~120 circoli senza rating WHS non compaiono in questa API.")
+    log(f"  {len(clubs_db)} circoli con club_id nel DB.")
+    if not clubs_db:
+        log("  Nessun circolo con club_id — esegui prima la fase 1 (geografico).")
+        return stats
 
     session = requests.Session()
     session.headers.update({
@@ -614,13 +601,13 @@ def scrape_campi_api() -> dict:
         "Referer": HANDICAP_PAGE_URL,
     })
 
-    for i, club in enumerate(clubs, 1):
-        nome = club["nome"]
-        club_id = club["club_id"]
+    for i, club in enumerate(clubs_db, 1):
+        campo_id = club["id"]
+        club_id  = club["club_id"]
+        nome     = club["nome"]
 
-        # Progresso ogni 10 circoli
         if i % 10 == 0 or i == 1:
-            log(f"  [{i}/{len(clubs)}] campi={stats['campi']} rating={stats['ratings']} errori={stats['errori']}")
+            log(f"  [{i}/{len(clubs_db)}] campi={stats['campi']} rating={stats['ratings']} errori={stats['errori']}")
 
         try:
             percorsi = _api_get_percorsi(session, club_id)
@@ -630,11 +617,6 @@ def scrape_campi_api() -> dict:
                 time.sleep(0.2)
                 continue
 
-            campo_id = save_campo({"nome": nome})
-            if not campo_id:
-                log(f"  [{i}] {nome}: impossibile salvare campo nel DB.")
-                stats["errori"] += 1
-                continue
             stats["campi"] += 1
 
             ratings_batch = []
