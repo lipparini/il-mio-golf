@@ -75,6 +75,11 @@
       <p id="valFormula" class="text-green-300 text-xs mt-2"></p>
     </div>
 
+    <!-- Errore par mancante -->
+    <div id="erroreParBox" class="hidden bg-red-50 border border-red-200 rounded-2xl p-4 text-center text-red-700 text-sm">
+      Par non disponibile per questo percorso. Impossibile calcolare l'handicap. Aggiorna i dati dei campi o segnala il problema.
+    </div>
+
   </div>
 
 </div>
@@ -154,9 +159,19 @@ function aggiornaCrSr() {
 function calcola() {
   const hcp = parseFloat(document.getElementById('inpHcp').value);
   const res = document.getElementById('risultato');
-  if (isNaN(hcp) || crVal === null || srVal === null || parVal === null) {
-    res.classList.add('hidden'); return;
+  const erroreBox = document.getElementById('erroreParBox');
+  res.classList.add('hidden');
+  erroreBox.classList.add('hidden');
+
+  if (crVal === null || srVal === null) return;
+
+  if (parVal === null) {
+    erroreBox.classList.remove('hidden');
+    return;
   }
+
+  if (isNaN(hcp)) return;
+
   const playingHcp = Math.round(hcp * (srVal / 113) + (crVal - parVal));
   document.getElementById('valResult').textContent = playingHcp;
   document.getElementById('valFormula').textContent =

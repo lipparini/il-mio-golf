@@ -582,8 +582,12 @@ def _api_get_cr_sr(session, club_id: str, percorso_id, tee: str):
       row[1] = CR (float)
       row[2] = SR (int)
       row[3] = tee colore capitalizzato (non usato — viene da parametro)
-      row[4] = Playing HCP calcolato per HCP 18.0 (non è par)
-    Ritorna solo (cr, sr) — par e buche vengono estratti dal nome percorso nel loop.
+      row[4] = Course Handicap calcolato dall'API per HCP Index 18.0
+               (per i percorsi a 9 buche l'API applica la regola WHS e usa
+               internamente metà indice, 9.0 — vedi _par_da_playing_handicap)
+    Ritorna (cr, sr, playing_hcp_18): il par si ricava altrove invertendo la
+    formula del playing handicap, molto più affidabile del nome del percorso
+    (alcuni percorsi, es. "Prime Nove", non contengono "Par NN" nel nome).
     """
     r = _api_post_with_retry(session, {
         "action": "course-handicap",
@@ -594,15 +598,36 @@ def _api_get_cr_sr(session, club_id: str, percorso_id, tee: str):
     })
     data = r.json()
     if not data or not isinstance(data, list):
-        return None, None
+        return None, None, None
     row = data[0]
-    if isinstance(row, (list, tuple)) and len(row) >= 3:
-        return row[1], row[2]
+    if isinstance(row, (list, tuple)):
+        cr = row[1] if len(row) >= 2 else None
+        sr = row[2] if len(row) >= 3 else None
+        ph18 = row[4] if len(row) >= 5 else None
+        return cr, sr, ph18
     if isinstance(row, dict):
         cr = row.get("cr") or row.get("CR") or row.get("course_rating")
         sr = row.get("sr") or row.get("SR") or row.get("slope_rating")
-        return cr, sr
-    return None, None
+        ph18 = row.get("playing_handicap") or row.get("course_handicap")
+        return cr, sr, ph18
+    return None, None, None
+
+
+def _par_da_playing_handicap(cr, sr, ph18, buche):
+    """
+    Ricava il par invertendo la formula WHS del Playing Handicap che l'API
+    restituisce già calcolato per HCP Index 18.0 (row[4] di course-handicap):
+        PH = round(HI_eff * SR/113 + CR - Par)  =>  Par = round(HI_eff*SR/113 + CR) - PH
+    HI_eff è 9.0 per i percorsi a 9 buche (regola WHS: si usa metà indice),
+    18.0 per i percorsi a 18 buche. L'arrotondamento commuta con la
+    traslazione per un intero, quindi la formula inversa è esatta (verificato
+    con l'API reale su percorsi con par noto dal nome, es. "18 Buche Par 71",
+    "Seconde Nove Par 35/36").
+    """
+    if cr is None or sr is None or ph18 is None:
+        return None
+    hi_eff = 9.0 if buche == 9 else 18.0
+    return round(hi_eff * sr / 113 + cr) - ph18
 
 
 def scrape_campi_api(progress_cb=None) -> dict:
@@ -660,9 +685,8 @@ def scrape_campi_api(progress_cb=None) -> dict:
                 if not perc_id:
                     continue
 
-                # Estrai par e buche dal nome percorso
-                # es. "18 Buche Par 71" → par=71, buche=18
-                # es. "Prime Nove" → par=None, buche=9
+                # Fallback se il nome non contiene "Par NN" (es. "Prime Nove") — il par
+                # vero viene ricavato dall'API in _par_da_playing_handicap qui sotto.
                 par_m = re.search(r'[Pp]ar\s*(\d+)', perc_nome)
                 par_from_nome = int(par_m.group(1)) if par_m else None
                 nome_lower = perc_nome.lower()
@@ -680,17 +704,20 @@ def scrape_campi_api(progress_cb=None) -> dict:
 
                 for tee in tees:
                     try:
-                        cr, sr = _api_get_cr_sr(session, club_id, perc_id, tee)
+                        cr, sr, ph18 = _api_get_cr_sr(session, club_id, perc_id, tee)
                         if cr is None or sr is None:
                             continue
+                        par = _par_da_playing_handicap(cr, sr, ph18, buche_from_nome)
+                        if par is None:
+                            par = par_from_nome
                         genere = _TEE_GENERE_API.get(tee.upper(), "M")
-                        log(f"    Salvato rating: campo={nome} percorso={perc_nome} tee={tee} CR={cr} SR={sr} par={par_from_nome}")
+                        log(f"    Salvato rating: campo={nome} percorso={perc_nome} tee={tee} CR={cr} SR={sr} par={par}")
                         ratings_batch.append({
                             "percorso": perc_nome,
                             "tee_colore": tee,
                             "genere": genere,
                             "buche": buche_from_nome,
-                            "cr": cr, "sr": sr, "par": par_from_nome,
+                            "cr": cr, "sr": sr, "par": par,
                         })
                     except Exception as e:
                         log(f"    [{i}] {nome} / tee={tee}: ERRORE CR/SR — {e}")
