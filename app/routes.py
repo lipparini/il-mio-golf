@@ -33,6 +33,18 @@ def admin_required(f):
     return decorated
 
 
+def _effective_par(par, buche, par_tot):
+    """Par del percorso con fallback quando campi_rating.par è NULL (nome percorso senza 'Par XX')."""
+    if par is not None:
+        return par
+    if par_tot:
+        try:
+            return int(par_tot)
+        except (ValueError, TypeError):
+            pass
+    return 36 if buche == 9 else 72
+
+
 # Stato scraping gare per utente: {utente_id: {status, message, added, last_run}}
 _scraping_state: dict[int, dict] = {}
 _scraping_lock = threading.Lock()
@@ -335,13 +347,21 @@ def api_campi_rating():
         with get_conn() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 cur.execute("""
-                    SELECT id, campo_id, COALESCE(percorso,'') AS percorso,
-                           tee_colore, genere, buche, cr::float AS cr, sr, par
-                    FROM campi_rating WHERE campo_id=%s
-                    ORDER BY buche DESC, percorso, genere, tee_colore
+                    SELECT rating.id, rating.campo_id, COALESCE(rating.percorso,'') AS percorso,
+                           rating.tee_colore, rating.genere, rating.buche, rating.cr::float AS cr,
+                           rating.sr, rating.par, c.par_tot
+                    FROM campi_rating rating
+                    JOIN campi c ON c.id = rating.campo_id
+                    WHERE rating.campo_id=%s
+                    ORDER BY rating.buche DESC, rating.percorso, rating.genere, rating.tee_colore
                 """, (campo_id,))
                 ratings = cur.fetchall()
-        return jsonify([dict(r) for r in ratings])
+        result = []
+        for r in ratings:
+            d = dict(r)
+            d["par"] = _effective_par(d.pop("par"), d.get("buche"), d.pop("par_tot"))
+            result.append(d)
+        return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -435,16 +455,22 @@ def api_simulazione_hcp():
         with get_conn() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 if rating_id:
-                    cur.execute("SELECT cr::float AS cr, sr, par FROM campi_rating WHERE id=%s", (rating_id,))
+                    cur.execute("""
+                        SELECT rating.cr::float AS cr, rating.sr, rating.par, rating.buche, c.par_tot
+                        FROM campi_rating rating JOIN campi c ON c.id = rating.campo_id
+                        WHERE rating.id=%s
+                    """, (rating_id,))
                 else:
                     cur.execute("""
-                        SELECT cr::float AS cr, sr, par FROM campi_rating
-                        WHERE campo_id=%s AND COALESCE(percorso,'')=%s
-                          AND tee_colore=%s AND genere=%s LIMIT 1
+                        SELECT rating.cr::float AS cr, rating.sr, rating.par, rating.buche, c.par_tot
+                        FROM campi_rating rating JOIN campi c ON c.id = rating.campo_id
+                        WHERE rating.campo_id=%s AND COALESCE(rating.percorso,'')=%s
+                          AND rating.tee_colore=%s AND rating.genere=%s LIMIT 1
                     """, (campo_id, percorso, tee_colore, genere))
                 row = cur.fetchone()
                 if row:
-                    cr, sr, par = row["cr"], row["sr"], row["par"]
+                    cr, sr = row["cr"], row["sr"]
+                    par = _effective_par(row["par"], row["buche"], row["par_tot"])
     except Exception as e:
         return jsonify({"error": f"Errore DB: {e}"}), 500
 
@@ -495,7 +521,7 @@ def api_simulazione_hcp():
         gross_score = gross_score_input
     else:
         if playing_handicap is None:
-            return jsonify({"error": "HCP Index attuale non disponibile: impossibile calcolare il Playing Handicap per lo Stableford."}), 400
+            return jsonify({"error": "Nessun HCP index disponibile. Carica prima i tuoi risultati."}), 400
         gross_score = par + playing_handicap - (punti_stableford - 36)
 
     sd_nuovo = round((113.0 / sr) * (gross_score - cr - pcc), 1)
