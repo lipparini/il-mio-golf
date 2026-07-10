@@ -416,13 +416,17 @@ def simulazione():
 @login_required
 def api_simulazione_hcp():
     try:
-        gross_score = float(request.args.get("gross_score", 0))
+        tipo_score = request.args.get("tipo_score", "stableford")
         campo_id = int(request.args.get("campo_id", 0))
         rating_id = request.args.get("rating_id", type=int)
         tee_colore = request.args.get("tee_colore", "")
         genere = request.args.get("genere", "")
         percorso = request.args.get("percorso", "")
         pcc = float(request.args.get("pcc", 0))
+        if tipo_score == "medal":
+            gross_score_input = float(request.args.get("gross_score", 0))
+        else:
+            punti_stableford = float(request.args.get("punti_stableford", 36))
     except (ValueError, TypeError) as e:
         return jsonify({"error": f"Parametri non validi: {e}"}), 400
 
@@ -446,8 +450,6 @@ def api_simulazione_hcp():
 
     if cr is None or sr is None:
         return jsonify({"error": "CR/SR non trovati."}), 400
-
-    sd_nuovo = round((113.0 / sr) * (gross_score - cr - pcc), 1)
 
     sd_list_db = []
     hcp_attuale_raw = None
@@ -478,19 +480,32 @@ def api_simulazione_hcp():
     except Exception as e:
         return jsonify({"error": f"Errore DB: {e}"}), 500
 
-    sd_list_20 = [{"data": "simulato", "sd": sd_nuovo, "gara": "Gara simulata", "nuovo": True}] + sd_list_db
-    n = len(sd_list_20)
-    indexed = sorted(enumerate(sd_list_20), key=lambda x: x[1]["sd"])
-    best8_indices = sorted([i for i, _ in indexed[:min(8, n)]])
-    best8_vals = [sd_list_20[i]["sd"] for i in best8_indices]
-    hcp_nuovo = round(sum(best8_vals) / len(best8_vals), 1) if best8_vals else None
-
     hcp_attuale = None
     if hcp_attuale_raw:
         try:
             hcp_attuale = float(str(hcp_attuale_raw).replace(",", "."))
         except ValueError:
             pass
+
+    playing_handicap = None
+    if hcp_attuale is not None:
+        playing_handicap = round(hcp_attuale * sr / 113 + cr - par)
+
+    if tipo_score == "medal":
+        gross_score = gross_score_input
+    else:
+        if playing_handicap is None:
+            return jsonify({"error": "HCP Index attuale non disponibile: impossibile calcolare il Playing Handicap per lo Stableford."}), 400
+        gross_score = par + playing_handicap - (punti_stableford - 36)
+
+    sd_nuovo = round((113.0 / sr) * (gross_score - cr - pcc), 1)
+
+    sd_list_20 = [{"data": "simulato", "sd": sd_nuovo, "gara": "Gara simulata", "nuovo": True}] + sd_list_db
+    n = len(sd_list_20)
+    indexed = sorted(enumerate(sd_list_20), key=lambda x: x[1]["sd"])
+    best8_indices = sorted([i for i, _ in indexed[:min(8, n)]])
+    best8_vals = [sd_list_20[i]["sd"] for i in best8_indices]
+    hcp_nuovo = round(sum(best8_vals) / len(best8_vals), 1) if best8_vals else None
 
     variazione = round(hcp_nuovo - hcp_attuale, 1) if hcp_nuovo is not None and hcp_attuale is not None else None
 
@@ -499,6 +514,7 @@ def api_simulazione_hcp():
         "sd_list": sd_list_20, "best8_indices": best8_indices,
         "hcp_nuovo": hcp_nuovo, "hcp_attuale": hcp_attuale,
         "variazione": variazione, "n_giri_disponibili": n,
+        "tipo_score": tipo_score, "gross_score": gross_score, "playing_handicap": playing_handicap,
     })
 
 

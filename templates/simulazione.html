@@ -54,10 +54,20 @@
       </select>
     </div>
 
+    <div>
+      <label class="block text-sm font-semibold text-gray-700 mb-1.5">Tipo di score</label>
+      <select id="selTipoScore" onchange="onTipoScoreChange()"
+              class="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm bg-white
+                     focus:outline-none focus:ring-2 focus:ring-green-500 min-h-[48px]">
+        <option value="stableford" selected>Stableford</option>
+        <option value="medal">Medal (stroke play)</option>
+      </select>
+    </div>
+
     <div class="flex gap-3">
       <div class="flex-1">
-        <label class="block text-sm font-semibold text-gray-700 mb-1.5">Gross Score</label>
-        <input id="inpGross" type="number" min="50" max="200" placeholder="es. 95"
+        <label id="lblScoreValue" class="block text-sm font-semibold text-gray-700 mb-1.5">Punti Stableford</label>
+        <input id="inpScoreValue" type="number" min="0" max="200" value="36" placeholder="es. 36"
                class="w-full border border-gray-300 rounded-xl px-4 py-3 text-base
                       focus:outline-none focus:ring-2 focus:ring-green-500 min-h-[48px]">
       </div>
@@ -80,6 +90,10 @@
   <div id="risultato" class="hidden space-y-4">
     <div class="bg-white rounded-2xl shadow p-5">
       <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Risultato simulazione</p>
+      <div id="grossCalcolatoBox" class="hidden bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-center mb-4">
+        <p class="text-xs text-gray-500">Gross Score calcolato</p>
+        <p id="grossCalcolatoVal" class="text-xl font-bold text-amber-800"></p>
+      </div>
       <div class="flex gap-3 mb-4">
         <div class="flex-1 bg-gray-50 rounded-xl p-3 text-center">
           <p class="text-xs text-gray-400">SD simulato</p>
@@ -119,6 +133,7 @@
 {% block scripts %}
 <script>
 const sdListAttuali = {{ sd_list | tojson }};
+const hcpAttualeJs = {{ hcp_attuale | tojson }};
 let ratingsData = [];
 let chartSimulato = null;
 
@@ -182,19 +197,59 @@ async function caricaPercorsi() {
   selTee.disabled = false;
 }
 
+function onTipoScoreChange() {
+  const tipo = document.getElementById('selTipoScore').value;
+  const lbl = document.getElementById('lblScoreValue');
+  const inp = document.getElementById('inpScoreValue');
+  if (tipo === 'stableford') {
+    lbl.textContent = 'Punti Stableford';
+    inp.value = 36;
+    inp.placeholder = 'es. 36';
+  } else {
+    lbl.textContent = 'Gross Score';
+    const ratingId = parseInt(document.getElementById('selTee').value);
+    const rating = ratingsData.find(r => r.id === ratingId);
+    let defaultVal = '';
+    if (rating && hcpAttualeJs) {
+      const hcpVal = parseFloat(String(hcpAttualeJs).replace(',', '.'));
+      if (!isNaN(hcpVal)) {
+        const ph = Math.round(hcpVal * (rating.sr / 113) + (rating.cr - rating.par));
+        defaultVal = rating.par + ph;
+      }
+    }
+    inp.value = defaultVal;
+    inp.placeholder = 'es. 95';
+  }
+}
+
 async function simula() {
-  const gross = parseFloat(document.getElementById('inpGross').value);
+  const tipo = document.getElementById('selTipoScore').value;
+  const scoreVal = parseFloat(document.getElementById('inpScoreValue').value);
   const ratingId = parseInt(document.getElementById('selTee').value);
   const pcc = parseFloat(document.getElementById('inpPcc').value) || 0;
 
-  if (isNaN(gross) || isNaN(ratingId)) {
-    alert('Seleziona il campo/tee e inserisci il Gross Score.'); return;
+  if (isNaN(scoreVal) || isNaN(ratingId)) {
+    alert('Seleziona il campo/tee e inserisci il valore dello score.'); return;
   }
 
-  const params = new URLSearchParams({ gross_score: gross, rating_id: ratingId, pcc });
+  const params = new URLSearchParams({ tipo_score: tipo, rating_id: ratingId, pcc });
+  if (tipo === 'medal') {
+    params.set('gross_score', scoreVal);
+  } else {
+    params.set('punti_stableford', scoreVal);
+  }
   const resp = await fetch('/api/simulazione_hcp?' + params);
   const data = await resp.json();
   if (data.error) { alert('Errore: ' + data.error); return; }
+
+  const grossBox = document.getElementById('grossCalcolatoBox');
+  if (data.tipo_score === 'stableford') {
+    const phTxt = data.playing_handicap !== null && data.playing_handicap !== undefined ? ` (Playing HCP ${data.playing_handicap})` : '';
+    document.getElementById('grossCalcolatoVal').textContent = data.gross_score + phTxt;
+    grossBox.classList.remove('hidden');
+  } else {
+    grossBox.classList.add('hidden');
+  }
 
   document.getElementById('sdNuovoVal').textContent = data.sd_nuovo;
   document.getElementById('hcpAttualeVal').textContent = data.hcp_attuale ?? '—';

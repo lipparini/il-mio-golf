@@ -273,3 +273,4 @@ flask --app "app:create_app()" run --debug
 | 2026-06-28 | Fix combo vuote: Dockerfile --workers 2 → 1 (bug critico: con 2 workers il polling status colpisce il worker sbagliato); caricaCampi() nei template ora ha try/catch + Array.isArray check |
 | 2026-07-09 | Fix campi_rating vuota: scrape_campi_api usa club_id dal DB (fase 1) invece di HTML scraping pagina handicap (la select viene caricata via JS, requests riceveva select vuota → 0 ratings, nessun errore) |
 | 2026-07-09 | Rimossa _api_get_clubs() (obsoleta); admin panel: pannello "Aggiorna campi" con trigger e polling stato; railway.toml: healthcheckPath / → /health |
+| 2026-07-11 | Simulatore HCP: aggiunto selettore "Tipo di score" (Stableford/Medal) in simulazione.html; /api/simulazione_hcp calcola Playing Handicap e Gross Score da Punti Stableford quando tipo_score=stableford, mostra Gross Score calcolato prima del risultato finale |
