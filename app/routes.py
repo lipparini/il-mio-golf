@@ -377,27 +377,11 @@ def handicap():
 @main_bp.route("/simulazione")
 @login_required
 def simulazione():
-    sd_list = []
     hcp_attuale = None
     uid = current_user.id
     try:
         with get_conn() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                cur.execute("""
-                    SELECT data_raw, sd, gara, esecutore FROM gare
-                    WHERE utente_id=%s AND sd IS NOT NULL AND sd <> ''
-                      AND sd ~ '^-?[0-9]+([,.][0-9]+)?$'
-                    ORDER BY data DESC LIMIT 20
-                """, (uid,))
-                for r in cur.fetchall():
-                    try:
-                        sd_list.append({
-                            "data": r["data_raw"], "sd": float(str(r["sd"]).replace(",", ".")),
-                            "gara": r["gara"] or "", "esecutore": r["esecutore"] or "",
-                        })
-                    except ValueError:
-                        pass
-
                 cur.execute("""
                     SELECT index_nuovo FROM gare
                     WHERE utente_id=%s AND index_nuovo IS NOT NULL AND index_nuovo <> ''
@@ -409,7 +393,7 @@ def simulazione():
     except Exception:
         pass
 
-    return render_template("simulazione.html", sd_list=sd_list, hcp_attuale=hcp_attuale)
+    return render_template("simulazione.html", hcp_attuale=hcp_attuale)
 
 
 @main_bp.route("/api/simulazione_hcp")
