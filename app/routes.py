@@ -445,7 +445,7 @@ def api_simulazione_hcp():
         with get_conn() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 cur.execute("""
-                    SELECT data_raw, sd, gara FROM gare
+                    SELECT data_raw, sd, gara, formula, stbl, ags FROM gare
                     WHERE utente_id=%s AND sd IS NOT NULL AND sd <> ''
                       AND sd ~ '^-?[0-9]+([,.][0-9]+)?$'
                     ORDER BY data DESC LIMIT 19
@@ -453,7 +453,8 @@ def api_simulazione_hcp():
                 for r in cur.fetchall():
                     try:
                         sd_list_db.append({"data": r["data_raw"], "sd": float(str(r["sd"]).replace(",", ".")),
-                                           "gara": r["gara"] or "", "nuovo": False})
+                                           "gara": r["gara"] or "", "nuovo": False,
+                                           "formula": r["formula"] or "", "stbl": r["stbl"] or "", "ags": r["ags"] or ""})
                     except ValueError:
                         pass
                 cur.execute("""

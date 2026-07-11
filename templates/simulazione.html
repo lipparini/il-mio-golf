@@ -88,6 +88,8 @@
             <tr class="text-left text-gray-400 text-xs uppercase tracking-wide border-b border-gray-100">
               <th class="py-2 pr-2 font-semibold">Data</th>
               <th class="py-2 pr-2 font-semibold">Gara</th>
+              <th class="py-2 pr-2 font-semibold">Formula</th>
+              <th class="py-2 pr-2 font-semibold">Score</th>
               <th class="py-2 pr-2 font-semibold text-right">SD</th>
               <th class="py-2 pl-2 font-semibold text-center">Best 8</th>
             </tr>
@@ -225,9 +227,23 @@ function popolaTabellaSD(sdList, best8Indices) {
     const simulataBadge = r.nuovo
       ? ' <span class="ml-1 inline-block bg-amber-400 text-white text-[10px] font-bold px-1.5 py-0.5 rounded align-middle">SIMULATA</span>'
       : '';
+
+    let formulaLabel, scoreLabel;
+    if (r.nuovo) {
+      formulaLabel = r.formula || '';
+      scoreLabel = r.scoreLabel || '';
+    } else {
+      formulaLabel = r.formula || '';
+      const stbl = (r.stbl || '').trim();
+      const ags = (r.ags || '').trim();
+      scoreLabel = stbl ? `${stbl} pt` : (ags ? `${ags} colpi` : '—');
+    }
+
     return `<tr class="border-b border-gray-50 last:border-0 ${rowClass}">
       <td class="py-2 pr-2 text-gray-600 whitespace-nowrap">${dataLabel}${simulataBadge}</td>
       <td class="py-2 pr-2 text-gray-600">${escapeHtml(r.gara)}</td>
+      <td class="py-2 pr-2 text-gray-500 whitespace-nowrap">${escapeHtml(formulaLabel)}</td>
+      <td class="py-2 pr-2 text-gray-600 whitespace-nowrap">${escapeHtml(scoreLabel)}</td>
       <td class="py-2 pr-2 text-right font-semibold ${r.isBest8 ? 'text-green-700' : 'text-gray-700'}">${r.sd.toFixed(1)}</td>
       <td class="py-2 pl-2 text-center">${r.isBest8 ? '★' : ''}</td>
     </tr>`;
@@ -292,6 +308,11 @@ async function simula() {
     }
   }
 
+  const simRow = data.sd_list.find(d => d.nuovo);
+  if (simRow) {
+    simRow.formula = tipo === 'medal' ? 'Medal' : 'Stableford';
+    simRow.scoreLabel = tipo === 'medal' ? `${scoreVal} colpi` : `${scoreVal} pt`;
+  }
   popolaTabellaSD(data.sd_list, data.best8_indices);
 
   document.getElementById('risultato').classList.remove('hidden');
